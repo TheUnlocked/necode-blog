@@ -1,0 +1,35 @@
+/* Ideally we could use :target, but the behavior of :target is bad. See https://github.com/w3c/csswg-drafts/issues/6942 */
+[id] {
+    scroll-margin-top: calc(64px + 16px);
+}
+
+html[data-mui-color-scheme="dark"] {
+    color-scheme: dark;
+    --mui-palette-background-default: black;
+    --mui-palette-text-primary: #d4d4d4;
+    --mui-palette-divider: rgba(225, 225, 225, 0.6);
+    --mui-palette-background-paper: black;
+}
+
+html[data-mui-color-scheme="light"] {
+    color-scheme: light;
+    --mui-palette-background-default: white;
+    --mui-palette-text-primary: black;
+    --mui-palette-divider: black;
+    --mui-palette-background-paper: white;
+}
+
+blockquote {
+    border-left: 4px solid var(--mui-palette-divider);
+    margin-left: 0;
+    padding-left: 1em;
+}
+
+.footnotes {
+    margin-top: 2em;
+    padding: 1em 2em 1em 1em;
+}
+
+.footnotes > h3 {
+    display: none;
+}

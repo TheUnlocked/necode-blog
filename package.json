@@ -9,16 +9,38 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@babel/core": ">=7.0.0 <8.0.0",
+    "@emotion/react": "^11.10.0",
+    "@emotion/styled": "^11.10.0",
+    "@mui/material": "^5.9.3",
+    "contentlayer": "^0.2.7",
+    "date-fns": "^2.29.1",
+    "hast-util-classnames": "^2.0.0",
+    "hast-util-find-and-replace": "^4.1.2",
+    "hast-util-from-text": "^2.0.0",
+    "hast-util-to-text": "^3.1.1",
     "next": "12.2.3",
+    "next-contentlayer": "^0.2.7",
+    "prismjs": "^1.28.0",
     "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "react-dom": "18.2.0",
+    "refractor": "^4.7.0",
+    "rehype-autolink-headings": "^6.1.1",
+    "rehype-prism-plus": "^1.4.2",
+    "rehype-slug": "^5.0.1",
+    "remark-gfm": "^3.0.1",
+    "unist-util-is": "^5.1.1",
+    "unist-util-visit": "^4.1.0"
   },
   "devDependencies": {
     "@types/node": "18.6.3",
+    "@types/prismjs": "^1.26.0",
     "@types/react": "18.0.15",
     "@types/react-dom": "18.0.6",
     "eslint": "8.21.0",
     "eslint-config-next": "12.2.3",
-    "typescript": "4.7.4"
+    "hast": "^1.0.0",
+    "typescript": "4.7.4",
+    "unified": "^10.1.2"
   }
 }
