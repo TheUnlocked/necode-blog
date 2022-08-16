@@ -4,6 +4,7 @@ pre {
 
 pre[class*="language-"] {
     border-radius: 1em;
+    box-shadow: var(--code-block-box-shadow);
 }
 
 /**

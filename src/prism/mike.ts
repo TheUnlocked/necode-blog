@@ -4,11 +4,11 @@ import { Syntax } from 'refractor';
 const mike: Syntax = ((prism: typeof Prism) => {
     prism.languages.mike = {
         twoAt: /@@(?:ERROR|WARN|!)/,
+        comment: /\/\/.*/,
         string: {
             pattern: /(["'])(?:\\(?:\r\n|[\s\S])|(?!\1)[^\\\r\n])*\1/,
             greedy: true
         },
-        comment: /\/\/.*/,
         keyword: [
             /\b(?:state|param|let|debug|type)\b/,
         ],

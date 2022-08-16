@@ -1,5 +1,6 @@
 .code-intercalate {
-    padding: 6px 6px 6px 14px;
+    color: var(--code-color-text-plain);
+    padding: 6px 6px 6px calc(4px + 1em);
     margin-top: 4px;
     margin-bottom: 4px;
     white-space: pre-wrap;
@@ -26,12 +27,20 @@
     background-color: var(--mui-palette-Alert-infoStandardBg);
 }
 
+.intercalate-success {
+    border: 0 solid var(--mui-palette-Alert-successFilledBg);
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    background-color: var(--mui-palette-Alert-successStandardBg);
+}
+
 .remark-code-title {
     padding: 1em 1em 0.5em 1em;
     border-radius: 1em 1em 0 0;
-    background-color: #121212;
+    background-color: var(--code-color-background);
     font-family: Menlo, Monaco, Consolas, "Andale Mono", "Ubuntu Mono", "Courier New", monospace;
     margin-top: 0.5em;
+    box-shadow: var(--code-block-box-shadow);
 }
 
 .remark-code-title + pre[class*="language-"] {

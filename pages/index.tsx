@@ -22,7 +22,7 @@ export default function Home({ posts }: PageProps) {
             <title>Necode Blog</title>
         </Head>
 
-        <Container maxWidth="md">
+        <Container maxWidth="md" sx={{ mt: 4 }}>
             <Typography variant="h1">Recent Posts</Typography>
             <Divider sx={{ mt: 2, mb: 4 }} />
             <Stack direction="column" sx={{ maxWidth: 'sm' }}>

@@ -9,6 +9,24 @@ html[data-mui-color-scheme="dark"] {
     --mui-palette-text-primary: #d4d4d4;
     --mui-palette-divider: rgba(225, 225, 225, 0.6);
     --mui-palette-background-paper: black;
+
+    --code-color-background: #121212;
+    --code-color-selection: #264F78;
+    --code-color-inline-text: #db4c69;
+    --code-block-box-shadow: ;
+
+    --code-color-text-plain: #d4d4d4;
+    --code-color-text-keyword: #569cd6;
+    --code-color-text-variable: #9cdcfe;
+    --code-color-text-comment: #6a9955;
+    --code-color-text-number: #b5cea8;
+    --code-color-text-string: #ce9178;
+    --code-color-text-control: #c586c0;
+    --code-color-text-function: #dcdcaa;
+    --code-color-text-regex: #d16969;
+    --code-color-text-type: #4ec9b0;
+    --code-color-text-escape: #d7ba7d;
+    --code-color-text-faded: #808080;
 }
 
 html[data-mui-color-scheme="light"] {
@@ -17,6 +35,45 @@ html[data-mui-color-scheme="light"] {
     --mui-palette-text-primary: black;
     --mui-palette-divider: black;
     --mui-palette-background-paper: white;
+
+    --code-color-background: #ffffff;
+    --code-color-selection: #add6ff80;
+    --code-color-inline-text: #db4c69;
+    --code-block-box-shadow: var(--mui-shadows-2);
+
+    --code-color-text-plain: #000000;
+    --code-color-text-keyword: #0070c1;
+    --code-color-text-variable: #0000ff;
+    --code-color-text-comment: #008000;
+    --code-color-text-number: #098658;
+    --code-color-text-string: #a31515;
+    --code-color-text-control: #af00db;
+    --code-color-text-function: #795e26;
+    --code-color-text-regex: #811f3f;
+    --code-color-text-type: #267f99;
+    --code-color-text-escape: #ee0000;
+    --code-color-text-faded: #800000;
+}
+
+body {
+    line-height: 1.55;
+}
+
+p {
+    margin-block-start: 1.3em;
+    margin-block-end: 1.3em;
+}
+
+p > code {
+    white-space: nowrap;
+}
+
+.necode-cat-link {
+    color: var(--AppBar-color);
+}
+
+.necode-cat-link:hover {
+    filter: drop-shadow(0 0 6px var(--AppBar-color)) drop-shadow(0 0 2px var(--AppBar-color));
 }
 
 blockquote {
@@ -26,10 +83,13 @@ blockquote {
 }
 
 .footnotes {
-    margin-top: 2em;
+    margin-top: 4em;
     padding: 1em 2em 1em 1em;
 }
 
 .footnotes > h3 {
-    display: none;
+    margin-top: 0.5em;
+    margin-bottom: 1em;
+    text-align: center;
+    font-family: Menlo, Monaco, Consolas, "Andale Mono", "Ubuntu Mono", "Courier New", monospace;
 }

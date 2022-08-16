@@ -20,8 +20,8 @@ const rehypePrismPlusExtras: Plugin<[], Root> = () => {
         }
         node.children.forEach((child, i) => {
             if (is<Element>(child, 'element') && child.tagName === 'span' && classesOf(child).includes('code-line')) {
-                const text = toText(child);
-                const parsed = text.match(/^@@(ERROR|WARN|INFO|!)\s*(.*)$/);
+                const text = toText(child, { whitespace: 'pre-wrap' });
+                const parsed = text.match(/^@@(ERROR|WARN|INFO|SUCCESS|!) ?(.*)\s*$/);
                 if (parsed) {
                     const [_, type, content] = parsed;
                     if (type === '!') {
@@ -34,6 +34,7 @@ const rehypePrismPlusExtras: Plugin<[], Root> = () => {
                             ERROR: 'intercalate-error',
                             WARN: 'intercalate-warning',
                             INFO: 'intercalate-info',
+                            SUCCESS: 'intercalate-success',
                         }[type] as string;
                         classnames(child, 'code-intercalate', classNameToAdd, { 'line-number': false });
                         if (i === 0) {

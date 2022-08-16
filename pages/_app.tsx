@@ -3,9 +3,9 @@ import '../styles/prism-theme.css';
 import '../styles/prism-plus.css';
 import '../styles/prism-plus-extras.css';
 import type { AppProps } from 'next/app'
-import { AppBar, CssBaseline, Toolbar, useScrollTrigger } from '@mui/material';
+import { CssBaseline } from '@mui/material';
 import { Experimental_CssVarsProvider as CssVarsProvider, experimental_extendTheme as extendTheme } from '@mui/material/styles';
-import { Link } from '../src/Link';
+import Header from 'src/Header';
 
 declare module '@mui/material/Typography' {
     interface TypographyPropsVariantOverrides {
@@ -44,22 +44,22 @@ const theme = extendTheme({
                 }
             ]
         },
+    },
+    breakpoints: {
+        values: {
+            xs: 0,
+            sm: 700,
+            md: 900,
+            lg: 1200,
+            xl: 1536,
+        }
     }
 });
 
 export default function MyApp({ Component, pageProps }: AppProps) {
-    const shouldElevate = useScrollTrigger({
-        disableHysteresis: true,
-        threshold: 0
-    });
-
     return <CssVarsProvider defaultMode="system" enableColorScheme theme={theme}>
         <CssBaseline />
-        <AppBar elevation={shouldElevate ? 4 : 0} position="sticky">
-            <Toolbar disableGutters sx={{ px: 2 }}>
-                <Link href="/" variant="h6" noWrap underline="hover">Home</Link>
-            </Toolbar>
-        </AppBar>
+        <Header />
         <Component {...pageProps} />
     </CssVarsProvider>;
 }

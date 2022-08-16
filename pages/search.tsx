@@ -71,7 +71,7 @@ function ConstraintPart({ color, text }: Constraint['parts'][number]) {
         case 'plain':
             return <>{text}</>;
         case 'subtle':
-            return <Box component="span" sx={{ color: ({ palette }) => palette.grey[800] }}>{text}</Box>
+            return <Box component="span" sx={{ color: 'var(--mui-palette-text-secondary)' }}>{text}</Box>
         case 'error':
             return <Box component="span" sx={{ color: ({ palette }) => palette.error.main }}>{text}</Box>
     }
@@ -80,10 +80,10 @@ function ConstraintPart({ color, text }: Constraint['parts'][number]) {
 export default function Home({ posts, query }: PageProps) {
     return <div className="mx-auto max-w-2xl py-16 text-center">
         <Head>
-            <title>Necode Blog</title>
+            <title>Necode Blog - Search</title>
         </Head>
 
-        <Container maxWidth="md">
+        <Container maxWidth="md" sx={{ mt: 4 }}>
             <Typography variant="h2" component="h1">
                 {query.length > 0
                     ? <code>{query.flatMap((constraint, cidx) => <>
