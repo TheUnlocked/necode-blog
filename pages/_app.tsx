@@ -44,6 +44,16 @@ const theme = extendTheme({
                 }
             ]
         },
+        // Can be removed once https://github.com/mui/material-ui/pull/33971 goes in
+        MuiIconButton: {
+            styleOverrides: {
+                root: ({ theme }) => ({
+                    '&:hover': {
+                        backgroundColor: `rgba(${theme.vars.palette.action.activeChannel} / ${theme.vars.palette.action.hoverOpacity})`
+                    }
+                })
+            }
+        }
     },
     breakpoints: {
         values: {
@@ -57,7 +67,7 @@ const theme = extendTheme({
 });
 
 export default function MyApp({ Component, pageProps }: AppProps) {
-    return <CssVarsProvider defaultMode="system" enableColorScheme theme={theme}>
+    return <CssVarsProvider defaultMode="system" enableColorScheme={false} theme={theme}>
         <CssBaseline />
         <Header />
         <Component {...pageProps} />

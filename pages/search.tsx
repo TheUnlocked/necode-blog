@@ -71,9 +71,9 @@ function ConstraintPart({ color, text }: Constraint['parts'][number]) {
         case 'plain':
             return <>{text}</>;
         case 'subtle':
-            return <Box component="span" sx={{ color: 'var(--mui-palette-text-secondary)' }}>{text}</Box>
+            return <Box component="span" sx={{ color: 'rgba(var(--mui-palette-text-primaryChannel) / 0.5)' }}>{text}</Box>
         case 'error':
-            return <Box component="span" sx={{ color: ({ palette }) => palette.error.main }}>{text}</Box>
+            return <Box component="span" sx={{ color: 'var(--mui-palette-error-main)' }}>{text}</Box>
     }
 }
 

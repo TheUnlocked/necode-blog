@@ -88,7 +88,6 @@ pre[class*="language-"] {
 .token.attr-name,
 .token.string,
 .token.char,
-.token.builtin,
 .token.deleted {
 	color: var(--code-color-text-string);
 }
@@ -157,7 +156,8 @@ pre[class*="language-"] {
 }
 
 .token.class-name,
-.token.maybe-class-name {
+.token.maybe-class-name,
+.token.builtin {
 	color: var(--code-color-text-type);
 }
 
@@ -234,12 +234,12 @@ pre[class*="language-"] {
 
 pre[class*="language-javascript"],
 code[class*="language-javascript"],
-pre[class*="language-jsx"],
-code[class*="language-jsx"],
+pre[class*="language-js"],
+code[class*="language-js"],
 pre[class*="language-typescript"],
 code[class*="language-typescript"],
-pre[class*="language-tsx"],
-code[class*="language-tsx"] {
+pre[class*="language-ts"],
+code[class*="language-ts"] {
 	color: var(--code-color-text-variable);
 }
 

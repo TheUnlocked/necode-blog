@@ -7,7 +7,7 @@ export interface TagChipProps {
 }
 
 function TagChip({ type, value }: { type: string, value: string }) {
-    const label = <><Box component="span" sx={{ color: 'var(--mui-palette-text-secondary)' }}>{type}:</Box>{value}</>;
+    const label = <><Box component="span" sx={{ color: 'rgba(var(--mui-palette-text-primaryChannel) / 0.5)' }}>{type}:</Box>{value}</>;
     return <Chip label={label} clickable component={Link} href={{ pathname: '/search', query: { q: [`${type}:${value.includes(' ') ? JSON.stringify(value) : value}`] } }} />
 }
 
