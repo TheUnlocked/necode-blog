@@ -1,0 +1,737 @@
+---
+title: Introducing MiKe
+subtitle: Constant-time control flow, automatic serialization, and more!
+authors: [Trevor Paley]
+createdOn: 2022-08-18
+tags: [mike, rtc, 3rd-party]
+---
+
+Just interested in the language? [Click here to skip ahead.](#about-mike)
+
+# Real-Time Communication in Necode
+
+<Info>
+    For some background on [Necode](https://www.necode.org), check out the [MQP report](https://www.necode.org/papers/mqp_report_2022.pdf).
+</Info>
+
+One of Necode's more novel features is the ability to link together students' programming environments so that they can interact with each other in real-time. The Canvas Ring demo[^canvas_ring] (in which a canvas moves between the students in a circle with each student making their own programmatic edits) showcases the potential of this technology, and I hope to explore its use cases more in the future. However, before that, there are still a few technical problems with Necode's RTC that need to be solved. In the first part of this post I will describe some[^some] of them, and then in the second part, I will present my solution.
+
+[^some]: Some, but not certainly not all. In the future I plan to implement a "Declarative RTC" API for activity development which should tackle another sizable chunk of issues.
+[^canvas_ring]: See [MQP Report Sec. 3.3.1](https://www.necode.org/papers/mqp_report_2022.pdf#page=32)
+
+## Internal State
+
+First some context. Necode's code is split into two main parts:
+- The Next.js server which consists of the frontend and REST API backend, and which is currently hosted on Vercel.
+- The websocket server, which coordinates live events such as starting/ending activities, processing submissions, and signalling clients to establish peer-to-peer WebRTC connections; it is currently hosted on a virtual machine at WPI.
+
+Next.js is "[serverless](https://en.wikipedia.org/wiki/Serverless_computing)," so internal state (state maintained within the program memory) that is assigned in the course of processing one request will probably have reverted to its initial value when a new process is spun up to handle the next request. Since internal state can't be relied upon  between invocations of API calls, I instead have to rely on external state, a database, if I want to maintain any persistent data.
+
+The websocket server is not limited by an inability to have internal state. In fact, it must not be, as the websockets themselves _require_ maintaining a TCP connection between the client and server, thus maintaining state between requests. To be clear though, this is the only thing that the websocket server does which requires internal state; all state other than the TCP connections could be offloaded to an external data store, like the Next.js side does. Regardless, when a crutch like internal state is available, it can be very appealing to use. The danger is that this crutch does not come without a price.
+
+Currently:
+- Restarting the websocket server ends all activities and resets all activity state, since that state is volatile.
+- Updating the websocket server requires restarting it, which has the aforementioned side effects.[^hot_reload]
+- The websocket server crashing for any reason has the same issue.
+- Because state is stored within the process and is thus not visible to other processes on other machines elsewhere, the websocket server cannot be scaled horizontally, and the only way to scale it is to use increasingly better-provisioned virtual machines and eventually increasingly powerful hardware.
+- Following from the previous issue, there is also _necessarily_ a single point of failure--if the single websocket server goes down, everything goes down with it.
+
+I can get rid of _some_ of the internal state in the websocket server since it's first-party code that I write, but Necode isn't just about first-party code. The whole idea behind having an API for RTC policies[^rtc_policies] is that anyone should be able to create their own policies to link students together in novel ways. Regulating the code that third parties write to make sure it has no internal state is much trickier.
+
+[^hot_reload]: Attempting to update the server without restarting it would run into the same issues that are described in [MQP Report Appendix A](https://www.necode.org/papers/mqp_report_2022.pdf#Appendix+A:+Hot+Reload). In fact, moving state out of the websocket server to a database so that the server can be restarted without interrupting activities is the exact same concept that is used to make hot reload possible.
+[^rtc_policies]: See [MQP Report Sec. 3.3.3](https://www.necode.org/papers/mqp_report_2022.pdf#RTC+Policies)
+
+## Extensibility
+
+I want third parties to be able to write RTC policies. In practice, it's unlikely that anyone other than me _will_ (just as it currently appears unlikely that anyone other than me will implement custom activities for Necode), but Necode should support someone who chooses to. The current architecture is not particularly condusive to this; in order to add a new RTC policy, a third party developer would have to download the Necode source, make a change, build the websocket server, log into the machine where the server is being hosted, swap out the build, and restart the server (which as we saw earlier, will lose all activity state).
+
+Of course, that same issue applies to the Next.js side currently as well. While a way to add in new activities without a complete re-build is planned, it has not yet been implemented. The only real advantage the activities have here is that under the serverless model, fewer seams show themselves during the transition from one build to another.
+
+### How To Add a Module
+
+Adding in new activity types or RTC policies without a re-build is not hard though. You just use `eval()`. Or you can `import()` a base64-encoded module if you prefer that, it's basically the same thing. By letting an admin upload pre-compiled modules, they can be loaded into a list and dynamically served by an API, or run in the background by the websocket server. In fact, Necode is basically ready to support this--both activity types and RTC policies are already collected into a list that items could be added to/removed from. Most of the real challenge would be gathering the motivation to do the grunt work associated with setting up a new database table and API and frontend admin page.
+
+## Safety
+
+At least, that's the case for the activities on the frontend. JavaScript, despite allowing developers to run arbitrary code on other people's computers, tends to be fairly tame in practice due to the tireless efforts of security engineers at big tech companies. While I'm still hesitant to run student code on other users' computers (even if it _shouldn't_ be able to do much harm with the level of sandboxing Necode provides), uploading activities to users' computers is different. Only admins would be able to upload new activity types, and if an admin wanted to be malicious, they could already just upload a new build of the server with malicious code. The real fear is bugs,[^malicious_third_party] which at worst should only freeze up a user's browser, if they're using the buggy activity. The damage would be an issue, but it certainly wouldn't be catastrophic.
+
+[^malicious_third_party]:
+    Attacks by a malicious third party would be a real concern as well if there were a thriving ecosystem of third-party activities that administrators would pick and choose from on a whim, but that's not currently the world we live in. If there eventually becomes a thriving ecosystem around Necode and this footnote comes back to haunt me, that would be very cool.
+
+    I should also note that supply chain attacks on modules used to implement the activities are a real concern, but those would be an issue whether or not new activity types could be added without making a new build of Necode.
+
+However, when running third-party code on the websocket server, the stakes shoot up. Bugs can mess up the user interface when they manifest on the frontend, but they can take down a massive chunk of Necode's functionality when they manifest on the backend. An error in implementation could corrupt activity state, rendering that activity instance unusuable. A denial-of-service bug (e.g. through an infinite/long-running loop or a vulnerable regular expression) could freeze the entire server and lock up all activities.[^vercel_is_still_safe] These issues are perhaps unlikely if the developers of custom RTC policies are being diligent, but the chance is high enough that I don't want to take that risk.
+
+[^vercel_is_still_safe]: The Next.js side is running on Vercel so it would be protected from the damage, but under the current architecture activities can't function properly without being able to communicate with the websocket server.
+
+## A New Language
+
+Making a new language has some notable advantages over letting RTC policy developers just program in something like JavaScript. Many of these fall into the bucket of increased constraints. I can force developers to use the APIs I provide to them, and I don't need to worry about developers trying to mess with things that they really shouldn't, like the file system or other aspects of the server. I can also limit what forms of control flow third party developers can use in order to make sure that it is impossible for them to accidentally denial-of-service the websocket server.
+
+Being more constrained also lets me get rid of problematic features like exceptions. Exceptions are great when you've truly hit a failure condition from which there is no recovery, but this new language does not need to be able to do everything, it just needs to be able to do enough for people to write RTC policies in it, and in an RTC policy, there should _never_ be circumstances so exceptional that they warrant an exception.
+
+But a new language doesn't just let me remove features, it also lets me add new ones which are too specialized for most general purpose languages but work great in this new highly domain-specific one. I can design the langauge such that programs written in it are guaranteed to fit into the stateless architecture, meaning program state can be automatically serialized and deserialized from a database without programmer intervention.
+
+But enough about that. This post is not just about why a new language would be a good addition to Necode, it's about an actual language which has been written for this purpose and exists now. So let's finish up the section on motivation and move onto the actual topic of this article.
+
+# About MiKe
+
+
+
+## The Name
+
+> There are only two hard things in Computer Science: cache invalidation and naming things.[^cache_invalidation]
+>
+> \- Phil Karlton
+
+[^cache_invalidation]: While I'm using the quote to lead into a section on the name of the language, cache invalidation also happens to be a hard part of implementing MiKe.
+
+As a project under the umbrella of Necode, it was important to me that MiKe also have its correct pronunciation be [non-obvious to English speakers](https://www.necode.org/#:~:text=how%20do%20you%20pronounce%20%22necode%22%3F).[^hard_pronunciation] If you couldn't get it from the capitalization, here are some more hints:
+
+[^hard_pronunciation]: This is obviously a joke, I would much rather not have to clarify how it's pronounced, which is why I capitalized the first letter of each syllable. I chose MiKe because _mike_ means "calico" in Japanese (hence the pronunciation). The name made more sense in the early design stage of the language and I just never bothered to change it since then; plus it fits in with Necode's cat theme.
+
+- mee-keh
+- mi-kè
+- mi-ké (wrong but close enough)
+- /mikɛ/
+- ミケ
+
+Basically, it's not pronounced like the human name Mike (/maɪk/).
+
+---
+
+Now that that's out of the way, the features:
+
+## Constant-Time Control Flow
+
+```mike showLineNumbers
+on example() {
+    let i = 0;
+    while (i < 10) {
+@@ERROR ERROR 3:19-4:20 Generic parser error: no viable alternative at input 'while(i<10){'. (mike2001)
+        i = i + 1;
+        debug i;
+    }
+}
+```
+
+MiKe prevents most denial-of-service bugs by simply restricting all control flow to constant-time operations. There are no loops, no recursion, no goto; just if and else and else if.
+
+This might seem a bit too restrictive at first. By limiting the language to constant-time control flow, any glimpse of turing completeness is long gone, and even parsing regular languages is a task too hard for MiKe. And yet, it's still good enough for most things it needs to be good for, which is implementing RTC policies in Necode.
+
+MiKe is certainly not the only language to explore constant-time code, though it is rarer in that it doesn't target high performance or branchless programming, just low time complexity. Shader languages like GLSL heavily discourage loops, unrolling them whenever possible, and in some cases (especially when targeting older hardware) don't support non-unrollable loops at all. [FaCT](https://github.com/PLSysSec/FaCT) forces constant-time programming to avoid side-channel timing attacks against cryptographic algorithms. The key thread in all of these languages is that they target a very specific domain, and that constant-time code allows them to provide for that domain better than a general purpose language possibly could.
+
+### Events
+
+A key aspect that makes constant-time control flow tolerable in MiKe is that it is purely event-based, and is intended to be invoked by a more powerful host language. For example, a typical MiKe program written for Necode will be set up like this:
+
+```mike
+on join(user: User) {
+    // ...
+}
+
+on leave(user: User) {
+    // ...
+}
+```
+
+Linking a full classroom of students together in constant time would be impossible, but if a developer just has to be able to link in a _single_ student in constant time, it starts to seem more realistic. There are still limits on what is possible within a single event call, but MiKe provides another way to mitigate that.
+
+### Externals
+
+Another key feature that makes MiKe work is "externals" that the host can provide to the developer. While the control flow in a MiKe program has to be constant time, external functions provided to it by the host do not. Despite having access to slower-than-constant-time code though, MiKe's constant-time control flow guarantee still ensures that it will be used in a constrained manner; if a programmer is given an O(n) function, the host _knows_ that the time complexity of the MiKe program will be in O(n), which may very well be considered acceptable.
+
+```ts:mike-necode.ts
+@@INFO A rough outline of how Necode provides a library for MiKe programs to use, including three external values.
+const necodeLib = {
+    types: [
+        { name: 'User', ... },
+        { name: 'Policy', ... },
+        { name: 'Group', ... },
+    ],
+    values: [
+        { name: 'link', type: functionOf([user, user], unit) },
+        { name: 'unlink', type: functionOf([user, user], unit) },
+        { name: 'Group', type: functionOf([policy], group) },
+    ]
+};
+const necodeLibImpl = {
+    types: { ... },
+    values: {
+        link: getName => ({ emit: `${getName(externals)}.link` }),
+        unlink: getName => ({ emit: `${getName(externals)}.unlink` }),
+        Group: getName => ({ emit: `${getName(externals)}.makeGroup` }),
+    },
+};
+
+mike.addLibrary(necodeLib);
+mike.addLibraryImplementation(necodeLibImpl);
+```
+
+## State
+
+MiKe supports a special type of top-level declaration called a "state definition":
+
+```mike
+state total: int = 0;
+
+on goal() {
+    total = total + 1;
+}
+```
+
+While state variables look like globals, they don't behave like them under the hood. Rather, state variables are arguments to events, which are [pure functions](https://en.wikipedia.org/wiki/Pure_function)[^impure_externals] that take a state as an input and return a new state as an output.
+
+[^impure_externals]:
+    Assuming no impure externals. MiKe does provide a `debug` statement, but it is intended to be _purely effectful_, in that it should only cause side effects and have no impact on pure logic. In other words, one should be able to convert:
+    ```mike
+    debug a, b, c;
+    ```
+    To:
+    ```mike
+    a; b; c;
+    ```
+    Without any change in program semantics. But of course, it is up to the host to follow through on that contract.
+
+```ts:host.ts
+const fireGoal = program.listeners.find(l => l.event === 'goal')!;
+
+const { state: newState } = fireGoal({
+    state: oldState,
+    ...
+});
+```
+
+MiKe also provides serialization utilities for state, so that state can be stored in a database and loaded when an event has to be fired. Because of this, types which are not generally serializable cannot be used as state:
+
+```mike showLineNumbers
+state fn: (int) => boolean = Set[0].has;
+@@ERROR ERROR 1:10-1:26 Tried to declare a state variable with type (int) => boolean, but that type is not serializable. (mike3003)
+state u: unit = Stack[1].push(4);
+@@ERROR ERROR 2:9-2:13 Tried to declare a state variable with type unit, but that type is not serializable. (mike3003)
+```
+
+Fortunately, MiKe can still serialize standard library types, external library types,[^serialize_library_types] and even user-defined types.
+
+[^serialize_library_types]: Assuming functioning serializers/deserializers are provided by the library developer (which they currently have to be, but that may be subject to change).
+
+```mike showLineNumbers
+type LinkedList(
+    length: int,
+    head: option<Node>,
+);
+
+type Node(
+    value: int,
+    next: option<Node>,
+);
+
+state root = LinkedList(0, none);
+
+type MethodCollection(
+    add: (string) => unit,
+    remove: (string) => boolean,
+);
+
+state methods = MethodCollection(Set[''].add, Set[''].remove);
+@@ERROR ERROR 18:16-18:61 Tried to declare a state variable with type MethodCollection, but that type is not serializable. (mike3003)
+```
+
+## Parameters
+
+Events to be used in a MiKe program can be defined by the host:
+```ts:host.ts
+mike.setEvents([
+    { name: 'goal', required: true, argumentTypes: [] }
+    { name: 'penalty', required: false, argumentTypes: [intType] }
+]);
+```
+And listeners must conform to the shape of the events:
+```mike
+on goal() {
+    // ...
+}
+
+on penalty(amt: int) {
+    // ...
+}
+```
+
+However, sometimes a MiKe program may want to offer up its own configuration options. This can be done with top-level `param` definitions:
+```mike
+param penaltyMax: int;
+state total = 0;
+
+on goal() {
+    // ...
+}
+
+on penalty(amt: int) {
+    if amt > penaltyMax {
+        total = total - penaltyMax;
+    }
+    else {
+        total = total - amt;
+    }
+}
+```
+
+Of course, depending on the use case, the host is free to reject MiKe programs that ask for parameters (or ask for the wrong ones). But to jump back to MiKe motivations for a moment, a native way for RTC policy definitions to request configuration would be immensely useful for Necode. The motivating example I encountered was a desire for a "small groups" policy (as seen below), and I'm sure there are many more.
+
+```mike:smallGroups.mike
+param subpolicy: Policy;
+@@INFO A parameter of type Policy can be filled by Necode with another RTC policy, which smallGroups can use in the sub-groups it creates.
+param groupSize: int;
+
+// ...
+
+on join(user: User) {
+    // ...
+}
+
+on leave(user: User) {
+    // ...
+}
+```
+
+A caveat about parameters is that because the program relies on the host to provide them, the set of types which can be parameters is much smaller. At the moment, it's limited to just `int`, `float`, `boolean`, `string`, `option<T>`, and whatever custom types the host defines with the `IsLegalParameter` attribute.
+
+```mike showLineNumbers
+param names: Set<string>;
+@@ERROR ERROR 1:0-1:25 Type Set<string> is not a valid parameter type. (mike3004)
+```
+
+## Exceptionless
+
+MiKe has no exception or panic system, and assuming it has been implemented correctly, there is no way to trigger one either. In case you were thinking that you could outsmart me with integer division by zero:
+```mike
+let x = 1 / 0;
+// x: option<int>
+```
+I know it feels weird, but it actually works out fine in practice.
+
+### If-Destructuring
+
+Because there are no exceptions, there needs to be a way to get a value out of an option without throwing an exception when the value doesn't exist. To achieve this, I decided to borrow Zig's ["payload capture" syntax](https://ziglearn.org/chapter-1/#payload-captures), which I have renamed to the (in my opinion) significantly clearer "if-destructuring"[^if_destructuring]:
+
+[^if_destructuring]:
+    I only show it with options, but the host can actually enable if-destructuring for their own custom types by adding an `IsLegalCondition` attribute with a `destructInto` field. For example:
+
+    ```ts
+    mike.addLibrary({
+        types: [{
+            name: 'Result',
+            numParameters: 2,
+            quantify: ([t, e]) => ({
+                attributes: [
+                    {
+                        kind: TypeAttributeKind.IsLegalCondition,
+                        destructInto: t,
+                    },
+                ],
+                members: {
+                    value: optionOf(t),
+                    error: optionOf(e),
+                },
+            }),
+        }],
+        values: [],
+    });
+
+    mike.addLibraryImplementation(...);
+    ```
+
+```mike
+state idByUser: Map<User, int> = {};
+
+on join(user: User) {
+    let idOpt = idByUser.get(user);
+    // idOpt: option<int>
+
+    if idOpt |id| {
+        // id: int
+    }
+}
+```
+
+Of course, you can also just avoid that altogether by offering up a default value:
+```mike
+param divisor: int;
+state total = 0;
+
+on goal() {
+    // ...
+}
+
+on penalty() {
+    total = (total / divisor).getOrDefault(0);
+}
+```
+
+## MiKe Internals
+
+This next section is all about implementation. If you aren't interested in compiler implementation, you may want to skip ahead to [MiKe In Practice](#mike-in-practice).
+
+### Compiler Architecture
+
+MiKe uses a query-based compiler architecture. If you're unfamiliar with the query-based architecture, [here's a great talk about it by Anders Hejlsberg](https://www.youtube.com/watch?v=wSdV1M7n4gQ), the designer of C# and TypeScript. This is the gist:
+
+A typical compiler architecture looks something like this:
+```plain
+       PHASE                  DATA
+
+                                │
+┌─────────────────┐      ┌──────▼──────┐
+│ Lexer           │◄─────┤ Source Text │
+└────────┬────┬───┘      └─────────────┘
+         │    └─────────────────┐
+┌────────▼────────┐      ┌──────▼──────┐
+│ Parser          │◄─────┤ Token List  │
+└────────┬────┬───┘      └─────────────┘
+         │    └─────────────────┐
+┌────────▼────────┐      ┌──────▼──────┐
+│ Typechecker     │◄─────┤ AST         │
+└────────┬────┬───┘      └───▲──┬──────┘
+         │    └──────────────┘  │
+┌────────▼────────┐             │
+│ Code Generation │◄────────────┘
+└─────────────┬───┘
+              └─────────────────┐
+                         ┌──────▼──────┐
+                         │ Output      │
+                         └──────┬──────┘
+                                ▼
+```
+There may be an optimization phase. There may be other intermediate representations. There may be multiple phases within typechecking. Some phases may be fused together or divided into multiple phases. But most compilers will at least broadly follow that architecture.
+
+However, the introduction of IDE features like code completion and red squiggles and hover-to-see-the-type-of-the-expression has revealed flaws in this design, since needing to lex, parse, and typecheck the entire program after every change to get any IDE support is just too slow. Some languages have special versions of the compiler just for IDE support, but needing to maintain two compilers is costly. The query-based architecture tries to solve this by having one compiler engineered to provide both IDE support and code generation:
+```plain
+    TOOLING               PHASE                 DATA
+
+       │                                          │
+┌──────▼──────┐    ┌─────────────────┐      ┌─────▼───────┐
+│ IDE         │    │ Lexer (incr.)   │◄─────┤ Source Text │
+└──────┬──────┘    └────────┬─────┬──┘      └─────────────┘
+       │                    │     └───────────────┐
+┌──────▼──────┐    ┌────────▼────────┐      ┌─────▼───────┐
+│ Lang Server │◄───┤ Parser (incr.)  │◄─────┤ Token List  │
+└──────▲──────┘    └────────┬─────┬──┘      └─────────────┘
+       │                    │     └───────────────┐
+       │           ┌────────▼────────┐      ┌─────▼───────┐
+       │           │ Code Generation │◄─────┤ AST         │
+       │           └────────▲─────┬──┘      └─────────────┘
+       └──────────┬─────────┘     └───────────────┐
+         ┌────────┴────────┐                ┌─────▼───────┐
+         │   Typechecker   │                │ Output      │
+         ├─────────────────┤                └─────────────┘
+         │ fetchType(node) │
+         │ ...             │
+         └─────────────────┘
+```
+A a few things have changed, but let's start at the top. Rather than lexing and parsing the entire program every time a change is made, which can be very slow, query-based compilers will usually use incremental parsing, which makes it so that only the AST nodes which changed (and their parents up to the root) need to be re-created (i.e. sibling, cousin, and child nodes do not). This represents an immense speed-up over reconstructing the entire AST every time there's a change.[^incremental_parsing]
+
+[^incremental_parsing]: Incremental parsing is the part of a query-based compiler which MiKe does _not_ currently have, simply because there has been no need to as of yet (I haven't written a MiKe language server), and incremental parsing is a pretty significant undertaking to implement. The rest of the compiler has been designed to support it, however, and as a stretch goal I hope to get a MiKe language server running some day.
+
+The other big change, and the reason for the name "query-based," is the typechecker, which has moved from a compiler phase to its own standalone module. Rather than typecheck the entire program all at once before doing anything with the type information, the typechecker has been flipped around so that it only performs the minimum effort required to satsify a type query. This allows for extremely fast IDE support, and the code generator can still get the information it needs by just querying the type of every node.
+
+Now that I've gone over the concept, here's a layout of MiKe's specific architecture (excluding tooling, which does not yet exist):
+```plain
+                           PHASE                 DATA
+
+                                                   │
+                    ┌─────────────────┐      ┌─────▼───────┐
+                    │ Lexer           │◄─────┤ Source Text │
+                    └────────┬─────┬──┘      └─────────────┘
+                             │     └───────────────┐
+┌─────────────┐     ┌────────▼────────┐      ┌─────▼───────┐
+│ Binder      │◄────┤ Parser          │◄─────┤ Token List  │
+└──────┬──────┘     └────────┬─────┬──┘      └─────────────┘
+       │                     │     └───────────────┐
+┌──────▼──────┐     ┌────────▼────────┐      ┌─────▼───────┐
+│ Typechecker ├────►│ Verifier        │◄─────┤ AST         │
+└──────┬──────┘     └────────┬────────┘      └─────────────┘
+       │                     │
+       │            ┌────────▼────────┐
+       └───────────►│ Code Generation │
+                    └──────────────┬──┘
+                                   └───────────────┐
+                                             ┌─────▼───────┐
+                                             │ Output      │
+                                             └─────────────┘
+```
+There are a couple of new elements here:
+- The _binder_ is a very light-weight, very fast, and very cacheable utility which maintains symbol tables and stores certain kinds of relationships between nodes.[^cache_invalidation_is_hard]
+- The _verifier_ makes sure that the whole program type-checks and has no other non-type-related issues.[^cache_invalidation_is_very_hard]
+
+[^cache_invalidation_is_hard]: If you read footnote [^cache_invalidation], this is where cache invalidation gets hard.
+[^cache_invalidation_is_very_hard]: If you read footnote [^cache_invalidation], this is where cache invalidation gets _very_ hard.
+
+Lexing/parsing is currently handled by an [ANTLR 4](https://www.antlr.org/) grammar. I have explored alternatives like [tree-sitter](https://tree-sitter.github.io/tree-sitter/), but if I want incremental compilation with high quality diagnostics, I'll probably have to roll my own. For now, I suspect that ANTLR 4 gives slightly higher quality parse trees in the face of syntax errors.
+
+### Serialization
+
+Serialization is hard. When serializing arbitrary object graphs, I need to be able to handle external types and cycles, and I need to be able to generate the code to do this for arbitrary types. The format I eventually came up with for storing these objects involved maintaining an array of objects, each of which can reference other objects in the array, and an object associating each state name with the index of an object in that array. In other words, the default state in this program:
+```mike
+type Pair(left: Box, right: Box);
+type Box(v: int);
+
+state b1 = Pair(Box(1), Box(2));
+state b2 = Box(3);
+```
+Gets serialized as[^ints_are_strings]:
+```json
+{
+    "objs": [
+        { "left": 1, "right": 2 }, // 0
+        { "v": 3 },                // 1
+        { "v": 4 },                // 2
+        "1",                       // 3
+        "2",                       // 4
+        { "v": 6 },                // 5
+        "3"                        // 6
+    ],
+    "refs": {
+        "b1": 0,
+        "b2": 5
+    }
+}
+```
+
+[^ints_are_strings]: You might be curious as to why `int`s become strings in the JSON representation. In MiKe, integers are _big integers_, but when JSON is deserialized (at least with `JSON.parse`), numbers get converted to doubles. The `float` type is actually also represented as a string when serialized because JSON doesn't support `Infinity`, `-Infinity`, or `NaN`.
+
+This format works fine with cycles too. Consider this test case:
+
+```mike
+type Foo(f: option<Foo>);
+
+state foo = Foo(none);
+
+on test() {
+    foo.f = some(foo);
+}
+```
+After running the `test` event, the serialized state should be:
+```json
+{
+    "objs": [{ "f": 1 }, { "hasValue": true, "value": 0 }],
+    "refs": { "foo": 0 }
+}
+```
+
+Deserialization is just taking that and doing the opposite. You could imagine that the object deserializer for that program would look something like:
+```ts
+function deserialize(obj, type) {
+    switch (type.name) {
+        case 'int':
+            return BigInt(obj);
+        case 'option':
+            if (obj.hasValue) {
+                return some(deserialize(obj.value, type.args[0]));
+            }
+            return none;
+        case 'Foo':
+            return {
+                f: deserialize(obj, { name: 'option', args: [{ name: 'Foo' }] })
+            };
+    }
+}
+```
+Unfortunately, being able to imagine something doesn't mean it will work in the real world. Try to see if you can spot the infinite recursion in the function above.
+
+Cycle checking is much easier than cycle creation. To check for a cycle, you just need to maintain a map between visited nodes and their index in the object array, and when you visit a node that's already in that map, you can just use the pre-computed index.
+
+The same model doesn't work for generating cycles. Serialization benefits from a level of indirection--objects being associated with array indices--which we don't have here. While lower level languages like C might be able to use pointer tricks to create a reference to a slot where a value will exist in the future, JavaScript, the target language, has no such capability. Without access to indirection, cycle generation _requires_ mutation after creating the object.[^cycle_generation_mutation]
+
+[^cycle_generation_mutation]: "Requires" is a strong word. Lazy evaluation also makes it possible to construct cycles, as described in [Tying the Knot](https://wiki.haskell.org/Tying_the_Knot). However, JavaScript is not a lazily evaluated language.
+
+Now, I _can_ safely mutate the objects generated for types defined in the MiKe program, since I have total control over how those are represented in memory. The process is actually fairly simple (though writing code to generate code to do this can be a bit trickier):
+
+1. Create an empty object
+2. Add it to the "seen" map (when serializing an object, if it's in the seen map, just return the associated value)
+3. Serialize and assign its fields (if there's a cycle, it will get cut off by the seen map)
+
+External types are another matter. If the host provides a foreign type with its own custom serializer and deserializer, I have very little control over how they implement theirs. For the standard library, it's mostly okay since it's impossible for a standard library object to contain itself without going through a MiKe-defined object.[^auto_boxing] However, if someone defined a type like:
+```ts
+mike.addLibrary({
+    types: [{
+        name: 'WeirdList',
+        quantify: () => ({
+            attributes: [...],
+            members: {
+                add: functionOf([weirdListType], unitType),
+            },
+        }),
+        ...
+    }],
+    ...
+});
+```
+It could cause some real issues. There is currently no solution to this without significantly changing the deserialization API for external library implementations and making it much less ergonomic.[^deserialization_api]
+
+[^auto_boxing]: I could automatically box foreign types in a transparent MiKe-managed type, but there would be no clean way to unbox them, and I don't want to make the host have to deal with these boxes that appear out of nowhere when MiKe claims that it provides serialization for free.
+
+[^deserialization_api]:
+    You may wonder how it would be possible even _with_ changing the API. Currently, type implementations provide a deserialization function (stringified) of the following type:
+    ```ts
+    deserialize(
+        // The parsed JSON object to deserialize
+        obj: any,
+        // A simplified version of the type of this object
+        type: SerializableType,
+        // A function to deserialize object references within this object
+        deserialize: (obj: any, type: SerializableType) => any,
+        // If a class was provided for the type implementation, that class
+        factory?: any
+    ): any;
+    ```
+    This could be replaced with _two_ deserialization functions, one for constructing the object and the other for mutating it:
+    ```ts
+    deserializeEmpty(
+        // The parsed JSON object to deserialize
+        obj: any,
+        // A simplified version of the type of this object
+        type: SerializableType,
+        // If a class was provided for the type implementation, that class
+        factory?: any
+    ): {
+        obj: any,
+        toDeserialize: { ref: number, type: SerializableType }[]
+    };
+    deserializePopulate(
+        // The parsed JSON object to deserialize
+        obj: any,
+        // A simplified version of the type of this object
+        type: SerializableType,
+        // The empty object created previously
+        emptyObj: any,
+        // The objects that deserializeEmpty said it wanted to deserialize
+        refs: { [ref: number]: any }
+    ): any;
+    ```
+    However, that API would not be fun for anyone.
+
+However, that's an edge case and automatic serialization/deserialization works for everything that I need it for in Necode.
+
+### Testing
+
+MiKe has a special comment-based testing system which sort of operates like the opposite of TypeScript's [fourslash](https://github.com/microsoft/TypeScript-Compiler-Notes/blob/main/systems/testing/fourslash.md). Here are a couple actual tests to show how it works:
+
+```mike:tests/diagnostics/assigntoexpression.mike showLineNumbers
+// import { DiagnosticCodes } from '../../src/diagnostics/DiagnosticCodes'
+
+type Foo(x: int);
+
+on test() {
+    // v expect diagnostics ~ has ~ id == DiagnosticCodes.AssignToExpression
+    1 = 2;
+    // v expect diagnostics ~ has ~ id == DiagnosticCodes.AssignToExpression
+    some(1) = 9;
+
+    let f = Foo(4);
+    f.x = 3;
+}
+
+// assert diagnostics.length == 2
+```
+```mike:tests/types/genericfunctions.mike showLineNumbers
+on test() {
+    //    v expect fetchType($.name) == fetchType($.value)
+    let x = some;
+    //  v expect $t == type('option<int>')
+    let i = x(5);
+    //  v expect $t == type('option<float>')
+    let f = x(5.0);
+    if x(some) |s| {
+        //   v expect fetchType($.lhs) == fetchType($.rhs)
+        some == s;
+    }
+}
+
+// assert diagnostics ~ none
+```
+
+In addition to these, there are also more traditional-looking tests which verify some of the behavior of generated code. While I wouldn't say that MiKe is _very_ well-tested, it's well-tested enough that I feel relatively comfortable using it in Necode at this point.
+
+## MiKe In Practice
+
+The API for using MiKe is fairly straightforward, though it does require a few steps. The typical boilerplate will look like this:
+```ts
+import { MiKe } from '@necode-org/mike';
+import { createMiKeDiagnosticsManager } from '@necode-org/mike/diagnostics';
+
+// Construct the MiKe object
+const mike = new MiKe();
+
+// Setup diagnostics
+const diagnostics = createMiKeDiagnosticsManager();
+mike.setDiagnosticsManager(diagnostics);
+@@INFO If you don't need diagnostics, you can skip this step and MiKe will use its own internal diagnostics manager.
+
+// Specify the events you need
+mike.setEvents([
+    ...
+]);
+
+// Add the target-independent library APIs
+mike.addLibrary(...);
+
+// Initialize the compiler
+mike.init();
+@@INFO MiKe can be reconfigured after initialization, but some internal structures may need to be rebuilt. Configuring before initialization saves on this overhead.
+
+// Load file(s)
+mike.loadScript(path, fs.readFileSync(path));
+```
+
+If you're looking to compile the files, you'll need a few additional steps:
+```ts
+import { JavascriptTarget } from '@necode-org/mike/codegen/js';
+
+// Set the compile target (currently only the JS target exists)
+mike.setTarget(JavascriptTarget);
+
+// Load the target-specific implementations for libraries you added
+mike.addLibraryImplementation(...);
+
+// Compile file(s)
+const output = mike.tryValidateAndEmit(path);
+if (output) {
+    // do something with compiled output
+}
+```
+
+However, if you just want to inquire about the type of a node, grab the root and start introspecting. There are also some useful utilities to help out in this process.
+```ts
+import { getNodeAt } from '@necode-org/mike/ast';
+import { stringifyType } from '@necode-org/mike/types';
+
+// Obtain a desired AST node
+const root = mike.getRoot(path);
+const node = getNodeAt(root, { line: 4, col: 19 });
+
+// Introspect
+console.log(stringifyType(mike.typechecker.fetchType(node)));
+```
+
+### Use In Necode
+
+Necode is not quite ready to uptake MiKe, but I hope to find the time to get it there within the next year, along with a bunch of other fixes to Necode's RTC. If the integration process ends up being interesting, maybe I'll make another blog post about it.
+
+### Can I Use It?
+
+Yes! MiKe is a very niche language, but no part of it is explicitly tied to Necode, so if it sounds like just the thing you're looking for, absolutely go for it. You can view/download/contribute to MiKe on GitHub at [TheUnlocked/mike-language](https://github.com/TheUnlocked/mike-language), or if you just want to use it, MiKe is also available as an NPM package at [`@necode-org/mike`](https://www.npmjs.com/package/@necode-org/mike).[^at_necode]
+
+[^at_necode]: I wanted to get `@necode` but sadly that was taken by someone whose NPM username is "necode". `@necodex` would've been a fun option too, but sadly that had been taken as well.
+
+One word of caution, in case you do want to use MiKe, is that the documentation is relatively sparse. I hope to improve that at some point, but for now, checking the `tests` and `samples` directories on GitHub may be helpful. And feel free to reach out through the GitHub issues if you encounter any problems.
+
+---
+---
+
+In this post I introduced a new programming language designed to address a large number of issues currently plaguing Necode's real-time communication. With niche features like constant-time control flow and automatic serialization of all persistent state, it's not a language for most tasks, but those features allow it to perfectly provide what Necode (and maybe your application) is looking for.
+
+Even if you don't end up using Necode (and I expect you won't), I hope you enjoyed reading about the language, its motivations, and its novel capabilities.
+
+Thanks for reading!
+
+\- Trevor Paley
