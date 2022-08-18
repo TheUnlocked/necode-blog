@@ -41,6 +41,7 @@
     font-family: Menlo, Monaco, Consolas, "Andale Mono", "Ubuntu Mono", "Courier New", monospace;
     margin-top: 0.5em;
     box-shadow: var(--code-block-box-shadow);
+    overflow: scroll;
 }
 
 .remark-code-title + pre[class*="language-"] {
