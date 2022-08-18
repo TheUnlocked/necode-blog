@@ -1,18 +1,19 @@
 import Head from 'next/head';
 import { compareDesc } from 'date-fns';
-import { allPosts, type Post } from 'contentlayer/generated';
+import { allPosts } from 'contentlayer/generated';
 import { GetStaticProps } from 'next';
 import { Container, Divider, Stack, Typography } from '@mui/material';
 import { PostCard } from 'src/PostCard';
+import { getPostMetadata, PostMetadata } from 'src/postTypes';
 
 interface PageProps {
-    posts: Post[];
+    posts: PostMetadata[];
 }
 
 export const getStaticProps: GetStaticProps<PageProps> = async () => {
     const posts = allPosts.sort((a, b) => {
         return compareDesc(new Date(a.createdOn), new Date(b.createdOn))
-    });
+    }).map<PostMetadata>(getPostMetadata);
     return { props: { posts } };
 }
 

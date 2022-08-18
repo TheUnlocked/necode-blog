@@ -1,9 +1,9 @@
 import { Box, Chip, Stack } from '@mui/material';
 import { Link } from './Link';
-import { Post } from 'contentlayer/generated';
+import { PostMetadata } from './postTypes';
 
 export interface TagChipProps {
-    post: Post;
+    post: PostMetadata;
 }
 
 function TagChip({ type, value }: { type: string, value: string }) {

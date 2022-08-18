@@ -54,7 +54,10 @@ export const getStaticProps: GetStaticProps<PageProps, PageParams> = async ({ pa
     if (params?.slug) {
         const post = allPosts.find(x => x.slug === params.slug);
         if (post) {
-            return { props: { post } };
+            const trimmedPost = { ...post };
+            // @ts-ignore
+            delete trimmedPost.body.raw;
+            return { props: { post: trimmedPost } };
         }
     }
     return {

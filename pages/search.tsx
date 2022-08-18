@@ -1,9 +1,9 @@
 import Head from 'next/head';
-import { allPosts, type Post } from 'contentlayer/generated';
+import { allPosts } from 'contentlayer/generated';
 import { GetServerSideProps } from 'next';
 import { Box, Container, Divider, Stack, Typography } from '@mui/material';
 import { PostCard } from 'src/PostCard';
-import { Fragment } from 'react';
+import { getPostMetadata, PostMetadata } from 'src/postTypes';
 
 interface Constraint {
     parts: {
@@ -13,7 +13,7 @@ interface Constraint {
 }
 
 interface PageProps {
-    posts: Post[];
+    posts: PostMetadata[];
     query: Constraint[];
 }
 
@@ -63,7 +63,7 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async ({ query 
         ] });
     }
     
-    return { props: { posts, query: constraints } };
+    return { props: { posts: posts.map(getPostMetadata), query: constraints } };
 }
 
 function ConstraintPart({ color, text }: Constraint['parts'][number]) {
