@@ -14,6 +14,7 @@
     "@emotion/styled": "^11.10.0",
     "@mui/icons-material": "^5.8.4",
     "@mui/material": "^5.9.3",
+    "@primer/octicons-react": "^17.4.1",
     "contentlayer": "^0.2.7",
     "date-fns": "^2.29.1",
     "hast-util-classnames": "^2.0.0",

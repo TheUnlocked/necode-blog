@@ -1,12 +1,15 @@
 import { Alert, Box, Container, Divider, Paper, Typography } from '@mui/material';
 import { GetStaticPaths, GetStaticProps, NextPage } from 'next';
 import Head from 'next/head';
-import { PropsWithChildren } from 'react';
+import { PropsWithChildren, useCallback } from 'react';
 import { Link } from '../../src/Link';
 import { allPosts, type Post } from 'contentlayer/generated'
 import { useMDXComponent } from 'next-contentlayer/hooks'
 import type { ParsedUrlQuery } from 'querystring';
 import TagChips from 'src/TagChips';
+import { StaticFetchProvider } from 'src/useStaticFetch';
+import * as ReactDOMServer from 'react-dom/server';
+import Issue from 'src/github/Issue';
 
 const h1 = (props: PropsWithChildren<{}>) => <>
     <Typography sx={{ mt: 6 }} variant="h2" fontWeight="500" {...props} />
@@ -31,6 +34,8 @@ const components = {
     h1, h2, h3, h4, h5, h6,
     sup, a, hr, section,
     Info,
+    // Should be able to import these in MDX, but ContentLayer issue prevents it.
+    Issue,
 };
 
 interface PageParams extends ParsedUrlQuery {
@@ -39,6 +44,8 @@ interface PageParams extends ParsedUrlQuery {
 
 interface PageProps {
     post: Post;
+    prefetchedData: { [url: string]: any };
+    fetcher?: (...args: Parameters<typeof fetch>) => any;
 }
 
 export const getStaticPaths: GetStaticPaths<PageParams> = async () => {
@@ -57,7 +64,22 @@ export const getStaticProps: GetStaticProps<PageProps, PageParams> = async ({ pa
             const trimmedPost = { ...post };
             // @ts-ignore
             delete trimmedPost.body.raw;
-            return { props: { post: trimmedPost } };
+
+            const toFetch = [] as (Parameters<typeof fetch>)[];
+            ReactDOMServer.renderToStaticMarkup(
+                <PostPage post={trimmedPost} prefetchedData={{}} fetcher={(...args) => toFetch.push(args)} />
+            );
+
+            return { props: {
+                post: trimmedPost,
+                prefetchedData: Object.fromEntries(
+                    (await Promise.allSettled(
+                        toFetch.map(args => fetch(...args).then(x => x.json()).then(x => [args[0], x]))
+                    ))
+                        .filter((x): x is PromiseFulfilledResult<any> => x.status === 'fulfilled')
+                        .map(x => x.value)
+                ),
+            } };
         }
     }
     return {
@@ -65,10 +87,17 @@ export const getStaticProps: GetStaticProps<PageProps, PageParams> = async ({ pa
     };
 };
 
-const PostPage: NextPage<PageProps> = ({ post }) => {
+const PostPage: NextPage<PageProps> = ({ post, prefetchedData, fetcher }) => {
+    const defaultFetcher = useCallback((...args: Parameters<typeof fetch>) => {
+        if (args[0] as string in prefetchedData) {
+            return prefetchedData[args[0] as string];
+        }
+        return fetch(...args).then(x => x.json());
+    }, [prefetchedData]);
+
     const MDXContent = useMDXComponent(post.body.code);
 
-    return <>
+    return <StaticFetchProvider fetch={fetcher ?? defaultFetcher}>
         <Head>
             <title>{`Necode Blog - ${post.title}`}</title>
             <meta name="description" content={post.subtitle} />
@@ -83,7 +112,7 @@ const PostPage: NextPage<PageProps> = ({ post }) => {
                 <MDXContent components={components} />
             </Box>
         </Container>
-    </>;
+    </StaticFetchProvider>;
 }
 
 export default PostPage;

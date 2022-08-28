@@ -12,7 +12,7 @@ html[data-mui-color-scheme="dark"] {
 
     --code-color-background: #121212;
     --code-color-selection: #264F78;
-    --code-color-inline-text: #db4c69;
+    --code-color-inline-background: rgba(110,118,129,0.4);
     --code-block-box-shadow: ;
 
     --code-color-text-plain: #d4d4d4;
@@ -27,6 +27,13 @@ html[data-mui-color-scheme="dark"] {
     --code-color-text-type: #4ec9b0;
     --code-color-text-escape: #d7ba7d;
     --code-color-text-faded: #808080;
+
+    --colorful-link-color: var(--mui-palette-primary-dark);
+
+    --gh-color-open-fg: #3fb950;
+    --gh-color-closed-fg: #f85149;
+    --gh-color-done-fg: #a371f7;
+    --gh-color-fg-muted: #8b949e;
 }
 
 html[data-mui-color-scheme="light"] {
@@ -38,7 +45,7 @@ html[data-mui-color-scheme="light"] {
 
     --code-color-background: #ffffff;
     --code-color-selection: #add6ff80;
-    --code-color-inline-text: #db4c69;
+    --code-color-inline-background: rgba(175,184,193,0.2);
     --code-block-box-shadow: var(--mui-shadows-2);
 
     --code-color-text-plain: #000000;
@@ -53,6 +60,13 @@ html[data-mui-color-scheme="light"] {
     --code-color-text-type: #267f99;
     --code-color-text-escape: #ee0000;
     --code-color-text-faded: #800000;
+
+    --colorful-link-color: var(--mui-palette-primary-main);
+
+    --gh-color-open-fg: #1a7f37;
+    --gh-color-closed-fg: #cf222e;
+    --gh-color-done-fg: #8250df;
+    --gh-color-fg-muted: #57606a;
 }
 
 body {
@@ -92,4 +106,21 @@ blockquote {
     margin-bottom: 1em;
     text-align: center;
     font-family: Menlo, Monaco, Consolas, "Andale Mono", "Ubuntu Mono", "Courier New", monospace;
+}
+
+.gh-issue-reference {
+    color: var(--colorful-link-color);
+    text-decoration: none;
+}
+
+.gh-issue-reference:hover {
+    text-decoration: underline;
+    text-decoration-color: var(--colorful-link-color);
+}
+
+:not(pre) > code {
+    background-color: var(--code-color-inline-background);
+    padding: 2px 4px;
+    line-height: 1;
+    border-radius: 6px;
 }

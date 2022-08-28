@@ -11,6 +11,6 @@ export function PostCard({ post }: { post: PostMetadata }) {
         </Typography>
         {post.subtitle}
         <TagChips post={post} />
-        <time dateTime={post.createdOn}>{formatDate(parseISO(post.createdOn), 'LLLL d, yyyy')}</time>
+        <time dateTime={post.createdOn}>{formatDate(+parseISO(post.createdOn), 'LLLL d, yyyy')}</time>
     </Box>;
 }
