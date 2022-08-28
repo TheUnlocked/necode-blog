@@ -108,12 +108,12 @@ blockquote {
     font-family: Menlo, Monaco, Consolas, "Andale Mono", "Ubuntu Mono", "Courier New", monospace;
 }
 
-.gh-issue-reference {
+a.gh-issue-reference {
     color: var(--colorful-link-color);
     text-decoration: none;
 }
 
-.gh-issue-reference:hover {
+a.gh-issue-reference:hover {
     text-decoration: underline;
     text-decoration-color: var(--colorful-link-color);
 }
