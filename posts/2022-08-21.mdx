@@ -1,0 +1,80 @@
+---
+title: Patches and TURN
+subtitle: The week of August 21, 2022
+authors: [Trevor Paley]
+createdOn: 2022-08-28T01:17:27Z
+tags: [weekly-update]
+---
+
+Welcome to the first weekly update! In order to better keep track of the progress working on Necode, I hope to create a new post at the end of every week describing what happened during the past week, and what the plans are for the next week. Without further ado:
+
+# Objective Progress
+
+## Issues
+
+Opened:
+
+* <Issue id={35}/>
+* <Issue id={36}/>
+
+Closed:
+
+* <Issue id={17}/>
+* <Issue id={29}/> (existing fix merged into main)
+* <Issue id={30}/> (existing fix merged into main)
+* <Issue id={34}/>
+* <Issue id={35}/>
+
+## Pull Requests
+
+_None this week_
+
+# Commentary
+
+## Completed
+
+A couple of the issues this week were just closed out by merging `simulated-users` into `main`. However, there were some actual fixes, for example the breadcrumbs which now work properly after being only half-implemented for almost the entire lifetime of the project.
+
+Another change was that [beta.necode.org](https://beta.necode.org) is now set up, referencing the production database but using the `main` branch for its code ([www](https://www.necode.org) is on `deploy`). The preview builds of other branches are still using a non-production database.
+
+But the biggest improvement completed this week was definitely setting up Necode's STUN/TURN server for RTC. For the first time, Canvas Ring actually works reliably across browsers, devices, and networks.
+
+### TURN Auth
+
+Here I write a bit about how TURN server authentication works, since the documentation on this is fairly spread out and I figure I should write a complete narrative based on what I have learned.
+
+Because TURN servers (which actually relay data) may have significantly higher bandwidth demands than STUN servers (which just coordinate P2P connections), they usually require authentication to make sure that only legitimate users can send data through the TURN server, and other people can't leech off of it.
+
+However, these credentials have to be visible to the clients in order for them to relay data through the TURN server. This presents a problem-- a bad actor can just log in as a client, snatch the TURN server credentials, and use them as if the TURN server wasn't secured at all.
+
+The solution is to have ephemeral credentials which expire after a fixed period of time. [coturn](https://github.com/coturn/coturn), the definitive software for running TURN servers, allows you to do this if you produce credentials in a particular way.
+
+1. Come up with a username, any username. In Necode I use the username of the user I'm providing TURN server credentials for, but it can really be anything, and doesn't need to be associated with any database entry anywhere.
+2. Decide when you want the credentials to expire. In Necode I set it to 2 hours past the current time. Note that this timestamp needs to be in _seconds_, so in JS you would calculate it as `Date.now() / 1000 + 60 * 60 * 2`.
+3. The username for the credentials is `timestamp:username`. For example, the credentials username might be `1661646600:tmpaley`, if I want to make the credentials for myself (username `tmpaley`) and I want them to expire at 8:30 PM ET on August 27, 2022.
+4. Come up with a secret. This is a genuine secret that should be shared only between coturn and the server generating the credentials.
+5. The credentials password is `HMAC_SHA1(input: username, key: secret)` encoded in base64. For example, going with the previous example and assuming the secret I decided on was `secret1`, the credentials password would be `base64(HMAC_SHA1('1661646600:tmpaley', 'secret1'))` which is `ybgZONqt7Xvw8q+mK32moAXgJeQ=`. Keep in mind that the bytes are encoded in base64, not the hex representation of the bytes.
+
+And then that credentials pair (`1661646600:tmpaley`, `ybgZONqt7Xvw8q+mK32moAXgJeQ=`) can be provided to the TURN server when trying to connect. Additionally, if a bad actor is generating new credentials every couple hours to leech off of the TURN server, they can be penalized because their username is part of the credentials.
+
+Here is some sample code for implementing this algorithm in Node.js:
+```js
+const { createHmac } = require('crypto');
+
+function createCredentials(name, secret) {
+    const now = Date.now() / 1000;
+    const expiresAt = now + 60 * 60 * 2;
+    
+    const username = `${expiresAt}:${name}`;
+    const password = createHmac('sha1', secret)
+        .update(username)
+        .digest()
+        .toString('base64'));
+
+    return { username, password };
+}
+```
+
+## WIP
+
+I've been working on fixing <Issue id={7}/> and <Issue id={8}/>, which has led me to do some larger design rethinking about Necode's REST API infrastructure. For the moment, work on API restructuring has taken precedence over the aforementioned issues, though I hope to get them closed out next week.
