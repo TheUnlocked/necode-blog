@@ -1,12 +1,14 @@
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
-const StaticFetchContext = createContext<(...args: Parameters<typeof fetch>) => any | Promise<any>>(() => {});
+export type StaticFetcherType = (url: string, init?: RequestInit | undefined) => Promise<Response>;
 
-export function StaticFetchProvider(props: PropsWithChildren<{ fetch: (...args: Parameters<typeof fetch>) => Promise<any> }>) {
+const StaticFetchContext = createContext<(...args: Parameters<StaticFetcherType>) => any | Promise<any>>(() => {});
+
+export function StaticFetchProvider(props: PropsWithChildren<{ fetch: (...args: Parameters<StaticFetcherType>) => Promise<any> }>) {
     return <StaticFetchContext.Provider value={props.fetch}>{props.children}</StaticFetchContext.Provider>;
 }
 
-export function useStaticFetch<T>(...args: Parameters<typeof fetch>): T | undefined {
+export function useStaticFetch<T>(...args: Parameters<StaticFetcherType>): T | undefined {
     const fetcher = useContext(StaticFetchContext);
     const data = useMemo(() => fetcher(...args), [fetcher, args]);
     const [result, setResult] = useState(data instanceof Promise ? undefined : data);

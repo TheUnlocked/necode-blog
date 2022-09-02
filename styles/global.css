@@ -123,4 +123,5 @@ a.gh-issue-reference:hover {
     padding: 2px 4px;
     line-height: 1;
     border-radius: 6px;
+    white-space: nowrap;
 }

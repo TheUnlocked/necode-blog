@@ -9,6 +9,7 @@ const nextConfig = {
     config.infrastructureLogging = {
       level: "error",
     }
+    config.resolve.fallback = { fs: false };
     return config;
   },
 };
