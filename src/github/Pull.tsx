@@ -1,26 +1,28 @@
-import { IssueClosedIcon, IssueOpenedIcon, SkipIcon } from '@primer/octicons-react';
+import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon } from '@primer/octicons-react';
 import { Link } from 'src/Link';
 import { useStaticFetch } from 'src/useStaticFetch';
 import reactStringReplace from 'react-string-replace';
 
-export interface IssueProps {
+export interface PullProps {
     repo?: string;
     id: number;
     short?: boolean;
 }
 
-export default function Issue({ repo, id, short }: IssueProps) {
+export default function Pull({ repo, id, short }: PullProps) {
     const {
         title: titleRaw = '',
         state = 'open',
-        state_reason = null,
-        html_url = `https://github.com/${repo ?? 'TheUnlocked/Necode'}/issues/${id}`,
+        draft = false,
+        merged = false,
+        html_url = `https://github.com/${repo ?? 'TheUnlocked/Necode'}/pulls/${id}`,
     } = useStaticFetch<{
         title: string,
         state: 'open' | 'closed',
-        state_reason: 'not_planned' | null,
+        draft: boolean,
+        merged: boolean,
         html_url: string,
-    }>(`https://api.github.com/repos/${repo ?? 'TheUnlocked/Necode'}/issues/${id}`, {
+    }>(`https://api.github.com/repos/${repo ?? 'TheUnlocked/Necode'}/pulls/${id}`, {
         headers: {
             Accept: 'application/vnd.github+json',
             Authorization: process.env.GITHUB_TOKEN!
@@ -28,13 +30,15 @@ export default function Issue({ repo, id, short }: IssueProps) {
     }) ?? {};
 
     const icon = state === 'open'
-        ? <IssueOpenedIcon fill="var(--gh-color-open-fg)" verticalAlign="text-top" />
-        : state_reason === 'not_planned'
-        ? <SkipIcon fill="var(--gh-color-fg-muted)" verticalAlign="text-top" />
-        : <IssueClosedIcon fill="var(--gh-color-done-fg)" verticalAlign="text-top" />
+        ? draft
+            ? <GitPullRequestDraftIcon fill="var(--gh-color-fg-muted)" />
+            : <GitPullRequestIcon fill="var(--gh-color-open-fg)" verticalAlign="text-top" />
+        : merged
+            ? <GitMergeIcon fill="var(--gh-color-done-fg)" verticalAlign="text-top" />
+            : <GitPullRequestClosedIcon fill="var(--gh-color-closed-fg)" verticalAlign="text-top" />
 
     if (short) {
-        return <Link className="gh-issue-reference" href={html_url} title={titleRaw}>
+        return <Link className="gh-pull-reference" href={html_url} title={titleRaw}>
             {repo}
             <span style={{ color: 'var(--mui-palette-text)' }}>#{id}</span>
         </Link>;
@@ -48,7 +52,7 @@ export default function Issue({ repo, id, short }: IssueProps) {
 
     return <>
         {icon}
-        <Link className="gh-issue-reference" sx={{ ml: 0.5 }} href={html_url} title={titleRaw}>
+        <Link className="gh-pull-reference" sx={{ ml: 0.5 }} href={html_url} title={titleRaw}>
             <span style={{ fontWeight: 600 }}>{title} </span>
             {repo}
             <span style={{ color: 'var(--mui-palette-text)' }}>#{id}</span>

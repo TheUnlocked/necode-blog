@@ -10,6 +10,7 @@ import TagChips from 'src/TagChips';
 import { StaticFetcherType, StaticFetchProvider } from 'src/useStaticFetch';
 import * as ReactDOMServer from 'react-dom/server';
 import Issue from 'src/github/Issue';
+import Pull from 'src/github/Pull';
 import Image from 'src/Image';
 import Video from 'src/Video';
 import { PostInfoProvider } from 'src/usePostInfo';
@@ -40,7 +41,7 @@ const components = {
     Info,
     Image, Video,
     // Should be able to import these in MDX, but ContentLayer issue prevents it.
-    Issue,
+    Issue, Pull,
 };
 
 interface PageParams extends ParsedUrlQuery {
