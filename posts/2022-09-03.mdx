@@ -1,0 +1,122 @@
+---
+title: The Great Lesson Overhaul
+subtitle: The week of August 28, 2022
+authors: [Trevor Paley]
+createdOn: 2022-09-04T01:34:31.394Z
+tags: [weekly-update]
+---
+
+# Actions
+
+## Issues
+
+Opened:
+
+* <Issue id={37}/> (this was from last week but I forgot to include it in last week's post)
+* <Issue id={38}/>
+* <Issue id={39}/>
+* <Issue id={40}/>
+* <Issue repo="mui/mui-x" id={6017} />
+
+Closed:
+
+* <Issue id={7}/> (in the [`lesson-overhaul`](https://github.com/TheUnlocked/Necode/tree/lesson-overhaul) branch)
+* <Issue id={8}/> (in the [`lesson-overhaul`](https://github.com/TheUnlocked/Necode/tree/lesson-overhaul) branch)
+* <Issue id={9}/> (rejected)
+* <Issue id={13}/>
+* <Issue id={15}/>
+* <Issue id={16}/> (no new progress on this, but I moved out the remaining work to <Issue short id={39}/> so I could close this issue)
+* <Issue id={24}/>
+
+## Pull Requests
+
+Opened:
+
+* <Pull repo="react-dnd/react-dnd" id={3495} />
+
+# Discussion
+
+## Last Week
+
+Last week I mentioned that I would be working on new infrastructure for implementing Necode's REST APIs. I did work on that, but some issues with how the new API would be typed led me to drop it for now. The work is on the [`refactor-endpoint-util`](https://github.com/TheUnlocked/Necode/tree/refactor-endpoint-util) branch.
+
+## This Week
+
+This week pretty much all of my development attention was on the classroom management page, and particularly on the lesson pane on the right side of it.
+
+### Fixes
+
+Previously, as part of an "optimization," changes made to a lesson would not immediately be sent to the server. Only after a certain amount of time of inactivity, leaving the page, or switching to a different lesson, would the local cached version be sent up to the server for storage in the database. While batching operations like this may not be a terrible idea in theory, there's no reason to do it unless an actual performance metric suggests it would be helpful, and the way I was doing it (sending over the entire lesson and letting the server reconcile the differences) caused a lot of problems. Particularly, data loss, data integrity loss, and client-server desyncs.
+
+The new approach is much more atomic. A request is now made after every change,[^config_changes] and the API now supports much more fine-grained tweaking of lesson/activity parameters. In conjunction with some new database schema-enforced data integrity constraints, building lessons now feels rock-solid.
+
+[^config_changes]: Some changes, such as typing into a text field, are still cached locally and only sent out on [blur](https://developer.mozilla.org/en-US/docs/Web/API/Element/blur_event). This is because unlike with creating and deleting and reordering activities, the cost of having a network round trip after every keystroke actually does have a meaningful performance impact.
+
+### Changes
+
+- The delete button looks slightly different
+- Dragging a widget now has a special drag visual rather than being a ghost of the widget
+- The drop location is now indicated by a blue line where the dragged element will be placed rather than showing a ghost version of the reordered result
+
+### New Features
+
+- Activities can now be dragged to other lessons on the calendar (including dates which currently have no lesson)
+- Activities can now be cloned
+- Activities can now be renamed
+- Activity widgets now show the activity type ID in the tooltip of a new info icon
+
+### Performance Optimization
+
+With some of the changes, especially the change to reordering activities, things were starting to get really sluggish.
+
+<Video src="before-optimization.mp4" />
+
+My suspicion was that this had to do with repeated calls to `getClientBoundingBox()` in order to determine where to show the blue preview line. `getClientBoundingBox()`, along with several other functions and properties, are notorious when it comes to performance because they trigger a [_reflow_](https://developer.mozilla.org/en-US/docs/Glossary/Reflow), something which can add a huge performance penalty when done frequently (e.g. on every hover event). However, as always, profiling is important.
+![](20220901211918.png)  
+<Image src="chrome-profile.png" alt="The Chrome developer tools profiling pane showing a flame graph and various statistics" />
+
+What I would only catch onto much later after significant reading graphs and commenting out code and reading more graphs is that relatively little of the time spent is actually being spent on rendering. However, if reflow were the culprit, we would expect rendering to be dominating the graph.
+
+Eventually, after seeing that most of the time was spent in React internals, I decided to install the [React Developer Tools](https://chrome.google.com/webstore/detail/react-developer-tools/fmkadmapgofadopljbjfkapdkoienihi) Chrome extension and take a look at what the specialized React profiler was saying.
+
+<Image src="react-profile-1.png" />
+
+I'll spare you the disappointingly large amount of time that I stared at this while still being convinced that reflow was the real issue, and just explain what this is showing.
+
+(Functional) React components only re-render when:
+- A hook triggers a component re-render (e.g. a `setState` function triggering `useState`)
+- A component's parent is re-rendered and supplies the component with different properties.
+
+In the flame graph, you can see that the root of the re-rendering was caused at `PageContext` from a hook update, presumably triggered by [`react-dnd`](https://github.com/react-dnd/react-dnd) (the drag-and-drop library I'm using). That's fine and expected. What is not fine and expected is that a ton of stuff is being rendered that doesn't change at all. Here's an illustration of what should have been re-rendered and what shouldn't have been:
+
+<Image src="react-profile-2.png" />
+
+So then, the question is: why was so much stuff re-rendering if it didn't change at all?
+
+Fortunately the React dev tools provide us with that information. Some of it re-rendered simply because it wasn't split out into separate components (i.e. the `children` prop changed), and that was expected. Less expected was elements like `StaticDatePicker`, which have no children and which should've had all the same properties, re-rendering.
+
+The issue essentially boiled down to two things:
+1. A function which was created every render being passed as a prop (so it would never referentially equal a previous function, even if the semantics were the same)
+2. An object which was created every render being passed as a prop (so it would never referentially equal a previous object, even if the contents were the same)
+
+React provides hooks to resolve both of these issues--`useCallback` and `useMemo`--but the ergonomics of memoizing every single [`sx`](https://mui.com/system/getting-started/the-sx-prop/) prop (a common culprit when exploring the profile) would be horrible, and would probably cause some performance issues itself.[^constant_sx]
+
+[^constant_sx]: Many instances of the `sx` props refer to (value-ly) constant objects, so those could be pulled outside of the component. This ergonomics of that suck too, but it's a bit less bad.
+
+However, functions and ordinary objects aren't the only things that can be memoized; component graphs can be memoized too. Along with extracting a component sub-graph to its own component (which sometimes works well but not always), this provides another way to make component graphs only re-render when an _interesting_ property changes. After applying both of those techniques in a few places, dragging performance is no longer an issue:
+
+<Video src="after-optimization.mp4" />
+
+## The Future
+
+There's still one lingering task for the lesson overhaul before I can close out the epic, which is the ability to move lessons to other dates. The API code for this is already written (assuming it works), but there is some frontend work to do. Hopefully that will get done in the next couple days.
+
+After that I see a few possible areas to tackle:
+1. Repeating lessons between classes/years (incl. data import/export, maybe also activity templates)
+2. Loading activities/widgets lazily in preparation for third-party activites
+3. Enhancements to HtmlTestActivity
+4. Submissions/RTC overhaul (including MiKe)
+5. Integrate more languages
+6. Documentation
+
+And so on. I think option 2 is probably the best course of action for now, not because third-party activities are so important, but because lazy loading activities will require some major refactoring (which is better to get out of the way early) and should hopefully result in some significant performance improvements from cold start (and often require downloading less data). We'll see though, maybe something else will come up which takes priority.
