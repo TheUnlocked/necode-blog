@@ -1,0 +1,118 @@
+---
+title: Cleaning Up
+subtitle: The week of August 28, 2022
+authors: [Trevor Paley]
+createdOn: 2022-09-11T18:34:03.780Z
+tags: [weekly-update]
+---
+
+# Actions
+
+## Issues
+
+Opened:
+
+* <Issue id={41}/>
+* <Issue id={42}/>
+* <Issue id={43}/>
+
+Closed:
+
+* <Issue id={31}/>
+* <Issue id={32}/> (fixed last week, forgot to close)
+* <Issue id={38}/>
+* <Issue id={42}/> (upstream <Issue short repo="mui/mui-x" id={6017} />)
+* <Issue id={43}/>
+* <Issue repo="mui/mui-x" id={6017} />
+
+## Pull Requests
+
+Opened:
+
+* <Pull repo="mui/mui-x" id={6030} />
+* <Pull repo="react-dnd/react-dnd" id={3498} />
+
+Merged:
+
+* <Pull repo="mui/mui-x" id={6030} />
+
+# Discussion
+
+## This Week
+
+The start of this week was consumed with finishing up the lesson overhaul, adding the ability to move/copy lessons, and also the ability to copy activities to other lessons by dragging them onto different dates while holding ctrl.
+
+After that came a lot of minor fixes, tying up some loose ends, general improvements, code cleanup. There was also a decent amount of reading through other projects' code (MUI, `react-dnd`, Vercel) to try to find the root cause of upstream issues and possibly contribute back, which consumed a decent chunk of time. And of course there was performance exploration and improvements.
+
+### Dyanmic Imports and Code Splitting
+
+One of the performance improvements which should help with first load is code splitting, in which the bundler (webpack via Next.js) splits the code into "chunks" of code which depend on each other, so that it can avoid sending code over the wire which is not immediately needed. This results in faster page loads, and potentially less data being sent (though if all the chunks are eventually sent, slightly more bandwidth would be consumed, so there is a balance).
+
+Code splitting in Webpack can be visualized as a [treemap](https://en.wikipedia.org/wiki/Treemapping) with `webpack-bundle-analyzer` (or in Next.js, the slightly more convenient wrapper of that, `@next/bundle-analyzer`). Both the client side and server side get code-splitting, though we're mostly concerned with the client since that's what has to get sent over a network[^server_bundles] so only the client analysis will be shown. Here's the client chunk visualization[^gzipped] from before any active work towards code splitting:
+
+[^server_bundles]: The server chunks being small might be important, since on cold start, the more code that has to run the slower it will be. That is actually a big issue with performance on Vercel right now, but Vercel does its own rebundling to prepare API routes for being stuffed into AWS lambdas, so attempting to increase code splitting would have limited impact. Also, the API routes are very light-weight with the exception of Prisma, the ORM I use, which I need on basically every request anyways.
+
+[^gzipped]: All visualizations are of the gzipped output with the "Show content of concatenated modules (inaccurate)" option enabled.
+
+<Image src="before-bundle.png" alt="A treemap showing a bunch of boxes of decreasing size" />
+
+The first thing that stands out is how [Brython](https://brython.info/), the library I use for running Python 3, accounts for over half of the total data being sent over, so we definitely want to avoid sending it whenever the Python 3 runtime is unneeded. The treemap doesn't show us dependencies though, so we need to actually look at the code to determine when the Python 3 chunk is loaded. Hint: it's loaded any time information about Python 3 is loaded, which is loaded any time any activity is loaded or the classroom management page is loaded.
+
+Anyways, let's hide the Brython chunks so we can get a better look at the other stuff.
+
+<Image src="before-bundle-no-brython.png" alt="A treemap showing a bunch of boxes of decreasing size, now without the brython chunks" />
+
+We can see once again that most of the code is concentrated in just a few chunks. That could be okay, if those all of the code in those chunks was actually required, but I'm skeptical. For example, you can see that a significant fraction of the left-most chunk is consumed by [Babel](https://babeljs.io/) modules (`@babel`). We need Babel for certain user code transformations, but like with Brython, we don't need it every time information about JavaScript or TypeScript is loaded, just when we want to compile it.
+
+Fortunately Webpack offers us a way to indicate that a dependency isn't needed immediately, by importing it dynamically rather than at the start of the file.
+
+```ts
+import { transformSync } from '@babel/core';
+// versus
+const { transformSync } = await import('@babel/core');
+```
+
+Though rather than importing each library that way, which would be _over-splitting_, I can split the behavior which needs them into a separate file, and then dynamically import that one file. Sensing a common theme, I changed the `LanguageDescription` API to now accept `Importable<RunnableLanguage>`, which requires that all language runtimes are loaded asynchronously, and makes importing grouped behavior much easier. With the change, Python 3's `LanguageDescription` now looks like this:
+
+```ts {11}
+export const pythonDescription = languageDescription({
+    name: 'python3',
+    monacoName: 'python',
+    displayName: 'Python 3',
+    icon: PythonIcon,
+    features: [
+        supportsEntryPoint,
+        supportsGlobal,
+        supportsIsolated
+    ] as const,
+    runnable: async () => new (await import('./impl')).default() as any,
+@@INFO `as any` is required here in order to break circular typing dependencies.
+});
+```
+
+If we look a little closer at the analysis, we can also see that modules associated with markdown are bundled with other stuff that they shouldn't need to be. Being able to render markdown is necessary for the instructions pane, but it is only needed when the instructions pane is actually visible, which is only when an `HtmlTestActivity`-derived activity is loaded. Once again, rather than cutting out the markdown stuff separately, we can just make a general API change saying that activities in general should use `Importable<ComponentType>`s rather than the component types directly. This is what the Canvas Ring's `ActivityDescription` looks like after the change:[^show_htmltestactivity]
+
+[^show_htmltestactivity]: I would have wanted to show the `ActivityDescription` for something like DOM Programming, but due to how the `HtmlTestActivity` family of activities works, you don't actually see the dynamic import in the code for specific activity types themselves (it's been offloaded to a separate module), so there wouldn't have been much interesting to show.
+
+```ts {7}
+const canvasActivityDescription = activityDescription({
+    id: 'core/canvas-ring',
+    displayName: 'Canvas Ring',
+    requiredFeatures: [
+        supportsEntryPoint
+    ] as const,
+    activityPage: async () => (await import('./CanvasActivity')).CanvasActivity,
+    rtcPolicy: 'ring',
+    defaultConfig: undefined
+});
+```
+
+After making all of these changes, we can take another look at the bundle analysis (excluding Brython, since that will look the same) to see if we've fixed the problem.
+
+<Image src="after-bundle-no-brython.png" alt="A treemap showing a bunch of boxes of decreasing size, now with many more smaller boxes" />
+
+As hoped, there are more chunks and they are more evenly sized.
+
+## The Future
+
+There are some other miscellaneous tasks that I want to work on (drag/drop, performance), but the main focus for now is going to be on RTC, and finally getting [MiKe](/posts/introducing-mike) into Necode. 
