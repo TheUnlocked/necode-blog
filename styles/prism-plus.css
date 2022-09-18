@@ -7,17 +7,9 @@ pre[class*="language-"] {
     box-shadow: var(--code-block-box-shadow);
 }
 
-/**
-   * Inspired by gatsby remark prism - https://www.gatsbyjs.com/plugins/gatsby-remark-prismjs/
-   * 1. Make the element just wide enough to fit its content.
-   * 2. Always fill the visible space in .code-highlight.
-   */
 .code-highlight {
     float: left;
-    /* 1 */
     min-width: 100%;
-    /* 2 */
-    counter-reset: line;
 }
 
 .code-line {
@@ -52,10 +44,6 @@ pre[class*="language-"] {
     /* Set highlight accent border color */
 }
 
-.line-number {
-    counter-increment: line;
-}
-
 .line-number::before {
     display: inline-block;
     width: 1rem;
@@ -64,5 +52,5 @@ pre[class*="language-"] {
     margin-left: -0.5em;
     color: rgb(130, 134, 142);
     /* Line number color */
-    content: counter(line);
+    content: attr(line);
 }

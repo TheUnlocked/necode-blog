@@ -40,6 +40,16 @@ const rehypePrismPlusExtras: Plugin<[], Root> = () => {
                         if (i === 0) {
                             classnames(parent, 'code-has-first-line-intercalate');
                         }
+
+                        delete child.properties?.line;
+
+                        for (const sibling of node.children.slice(i + 1)) {
+                            if (is<Element>(sibling, 'element')) {
+                                if (sibling.properties?.line) {
+                                    sibling.properties.line = +sibling.properties.line - 1;
+                                }
+                            }
+                        }
                     }
                 }
             }

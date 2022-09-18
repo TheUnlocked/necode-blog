@@ -1,0 +1,131 @@
+---
+title: RTC Beginnings
+subtitle: The week of September 11, 2022
+authors: [Trevor Paley]
+createdOn: 2022-09-18T06:24:25.432Z
+tags: [weekly-update, mike, rtc]
+---
+
+# Actions
+
+## Issues
+
+Opened:
+
+* <Issue id={44}/>
+
+Closed:
+
+* <Issue id={44}/>
+
+## Pull Requests
+
+_None this week_
+
+# Discussion
+
+## On the Side
+
+At the start of this week I made a new drag-and-drop library to take advantage of certain HTML5 DND features like dragging objects between windows and to obtain finer control over the [drop effect](https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/dropEffect). The library is designed to be fairly easy to replace `react-dnd` (the current DND library Necode is using) with, and to be very small and cheap (it should be much cheaper than `react-dnd`). The library is not yet integrated into Necode, but hopefully that will change in the coming weeks.
+
+## MiKe Integration
+
+The ring RTC policy has been replaced with `ring.mike` on the `mike-migration` branch, and the integration has been surprisingly smooth so far. It has also helped uncover and fix a number of issues, with more on the docket to be resolved. Most of the remaining issues seem to be on the frontend, which will hopefully get resolved by simplifying WebRTC logic using the new Declarative RTC API.
+
+## Declarative RTC API
+
+The Declarative RTC API will introduce a set of new [hooks](https://reactjs.org/docs/hooks-overview.html) in order to simplify development and allow developers of activities to ignore the details of linking WebRTC connections and attaching/detaching data and media streams from the peer-to-peer link.
+
+In a way, this already exists. RTC in Necode is currently abstracted by the `useRTC` hook, which handles linking and unlinking peers, letting the activity developer do what they will with the peer itself in hand.
+
+```tsx:src/activities/canvas/CanvasActivity.tsx showLineNumbers=166
+useRTC(socketInfo, (peer, info) => {
+    if (info.role === 'send') {
+        setSendPeer(peer);
+    }
+    else {
+        peer.on('stream', stream => {
+            setInboundMediaStream(stream);
+        });
+    }
+});
+```
+
+However, `useRTC` only hides the process of making connections, it doesn't hide any of the details of how to move around data once those connections are made. The activity developer still needs to attach/detach media and data streams by hand, and they have to do this by interacting with the [`simple-peer`](https://github.com/feross/simple-peer) peer instance, meaning I can't switch out my WebRTC library in the future without also breaking activities.
+
+The goal of declarative RTC will be to abstract not just connecting with other nodes, but also the details behind how data is sent between the nodes. The activity developer will simply declare the policy that should be used to construct the network topology and what media/data channels they need to send data on, and they will receive a set of functions, objects, and callbacks slots to perform whatever business logic they require.
+
+<Info severity="warning">The following is a concept and has not yet been subjected to the trials of real-world implementation and usage.</Info>
+
+The core of the API will be `useRtc`, a higher-order hook that serves a similar purpose to `useRTC` today. However, `useRtc` will instead return an object containing a number of other hooks, like `useMediaChannel` and `useDataChannel`. These can then be used to declare channels of communication, which should all hook up between nodes assuming everyone is running the same activity as they should be.
+
+```ts
+const { useMediaChannel, useDataChannel } = useRtc('ring');
+```
+
+`useMediaChannel` will simplify media streams by providing a `MediaStream[]` for incoming media (depending on the policy there could be multiple inbound streams) and a `(stream: MediaStream) => void` function for setting the output media stream:
+
+```tsx
+const [[inboundMediaStream], setOutboundMediaStream] = useMediaChannel();
+
+function canvasLoadHandler(canvas: HTMLCanvasElement | null) {
+    if (canvas) {
+        setOutboundMediaStream(canvas.captureStream(10));
+    }
+}
+
+return <>
+    <canvas ref={canvasLoadHandler} />
+    <VideoOnly srcObject={inboundMediaStream} />
+</>
+```
+
+`useDataChannel` will do something similar, but for data streams:
+
+```tsx
+const emitData = useDataChannel<string>(incomingMessage => {
+    // handle incoming message
+    console.log(`peer said ${incomingMessage}`);
+});
+
+function clickHandler() {
+    emitData('Hi');
+}
+
+return <button onClick={clickHandler}>Click me!</button>;
+```
+
+In addition to these, a `handle` field will be exposed, which can be passed to third-party hooks as a more ergonomic way of providing them with these RTC primitives:
+
+```tsx
+function useY({ useDataChannel }: RtcHandle) {
+    const emitData = useDataChannel(incoming => {
+        // ...
+    });
+    // ...
+}
+
+function MyComponent() {
+    const { useDataChannel, handle } = useRtc('ring');
+
+    const [yText, awareness] = useY(handle);
+    const [editor, setEditor] = useState<editor.IStandaloneCodeEditor>();
+
+    useEffect(() => {
+        if (yText && editor) {
+            const binding = new MonacoBinding(
+                yText,
+                editor.getModel(),
+                new Set([editor]),
+                awareness,
+            );
+    
+            return () => binding.destroy();
+        }
+    }, [yText, awareness, editor]);
+
+    return <MonacoEditor onMount={setEditor} />
+}
+```
+
+The new declarative RTC API will significantly ease the process of creating networked activities, and when combined with MiKe policies, will allow both myself and third-party developers to create new experiences on both the topological and data layers without needing to concern ourselves with any lower-level details of how Necode's RTC actuallly works.
