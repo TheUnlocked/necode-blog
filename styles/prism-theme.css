@@ -1,5 +1,5 @@
 pre[class*="language-"],
-code[class*="language-"] {
+code[class*="language-"]:not([class*="language-diff"]) {
 	color: var(--code-color-text-plain);
 	font-size: 14px;
 	text-shadow: none;
@@ -232,14 +232,16 @@ pre[class*="language-"] {
 * Language Specific
 */
 
-pre[class*="language-javascript"],
-code[class*="language-javascript"],
-pre[class*="language-js"],
-code[class*="language-js"],
-pre[class*="language-typescript"],
-code[class*="language-typescript"],
-pre[class*="language-ts"],
-code[class*="language-ts"] {
+pre[class][class*="language-javascript"],
+code[class][class*="language-javascript"],
+pre[class][class*="language-js"],
+code[class][class*="language-js"],
+pre[class][class*="language-typescript"],
+code[class][class*="language-typescript"],
+pre[class][class*="language-ts"],
+code[class][class*="language-ts"],
+pre[class][class*="language-tsx"],
+code[class][class*="language-tsx"] {
 	color: var(--code-color-text-variable);
 }
 

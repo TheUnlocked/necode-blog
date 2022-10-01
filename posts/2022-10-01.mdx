@@ -1,0 +1,162 @@
+---
+title: One Giant Leap for RTC
+subtitle: The week of September 25, 2022
+authors: [Trevor Paley]
+createdOn: 2022-10-01T23:53:12.705Z
+tags: [weekly-update, rtc]
+---
+
+# Actions
+
+## Issues
+
+Opened:
+
+* <Issue id={45}/>
+* <Issue id={46}/>
+* <Issue id={47}/>
+* <Issue id={48}/>
+* <Issue id={49}/>
+* <Issue id={50}/>
+
+Closed:
+
+* <Issue id={21}/>
+* <Issue id={33}/>
+* <Issue id={49}/>
+
+## Pull Requests
+
+_None this week_
+
+# Discussion
+
+No post last week because there was a lot of stuff going on and not a whole lot to report. This week though, there was a lot of progress on RTC and I'm proud to announce that the RTC overhaul is... working, sort of, at least the parts of it that have been implemented. Since that's gonna be the main topic for this update, let's just get straight into it:
+
+## Design Changes
+
+The API design has had to be changed a little bit since [last update](/posts/2022-09-17). Here's some side-by-side:
+
+```diff-tsx
+- const { useMediaChannel, useDataChannel } = useRtc('ring');
+- const [[inboundMediaStream], setOutboundMediaStream] = useMediaChannel();
++ const [[inboundMediaStream], setOutboundMediaStream] =
++     useMediaChannel(NetworkId.NET_0, 'canvas');
+  
+  function canvasLoadHandler(canvas: HTMLCanvasElement | null) {
+      if (canvas) {
+          setOutboundMediaStream(canvas.captureStream(10));
+      }
+  }
+  
+  return <>
+      <canvas ref={canvasLoadHandler} />
+      <VideoOnly srcObject={inboundMediaStream} />
+  </>;
+```
+
+### Explicit Network IDs
+
+An RTC network is associated with a particular topology constructed by an RTC policy. Want to have students coordinated by both a ring and small groups at the same time? You need two networks. Want two types of data to be sent in a ring? You only need one network for that with two channels on it.
+
+Previously, the intent was to have the necessary networks be automatically determined through invocations of the `useRtc` hook. However, that presented a problem. To see why, we need to take a step back and look at what informed Necode's RTC before Declarative RTC.
+
+Originally, way back in early development, the plan wasn't to run RTC policies on a server, but rather to run them on the instructor's client. There are some really nice benefits to this, such as that the websocket server can be dead simple and it's trivial for activity developers to coordinate users in dynamic ways. However, there are also some problems:
+
+- What if multiple instructors are connected (or even just one instructor is connected on multiple tabs)? Who should get precedence with linking users?
+- What if the instructor leaves and comes back? How will network state be preserved?
+- What if the instructor is temporarily disconnected? How can new students join the network?
+
+So I came up with a compromise that I felt worked best: the instructor will declare a policy for linking students when they create the activity, and the server will have logic to build a network topology based on whatever policy it was told to use.[^mismatched_policies][^mike]
+
+[^mismatched_policies]: Note that this means that the server doesn't enforce that the correct policies are being used for a particular activity at all, and if an instructor really wanted to, they could bypass frontend checks to run activities with policies they weren't designed for. This is perfectly acceptable from my perspective, and perhaps even preferred.
+
+[^mike]: In a way, it was those issues which led to the issues which eventually motivated MiKe. If I could have guaranteed that the instructor would always be connected to an activity that they're running, MiKe would never have needed to be created.
+
+Now back to the `useRtc` hook, this issue partially manifests again, though slightly differently. This time, the necessary policies cannot be determined without running the activity.
+
+_Sort of._
+
+Because of how React hooks are designed, they should be called the exact same number of times every time the component containing them renders. In other words, you can't have a conditional hook like this:
+
+```tsx
+if (config.networked) {
+    const { useMediaChannel } = useRtc('ring');
+@@ERROR React Hook "useRtc" is called conditionally. React Hooks must be called in the exact same order in every component render. eslint(react-hooks/rules-of-hooks)
+}
+```
+
+This opens the door for an alternative way of determining the policies statically: just render the activity ahead of time, track the invocations of `useRtc`, use that to construct the policy, and then do something different when `useRtc` is called during runtime. With [Contexts](https://reactjs.org/docs/context.html) that wouldn't even be that hard to do.[^blog_contexts] However there are still problems, particularly that it doesn't actually solve conditional rendering. _Most of the time_ activity developers will use `useRtc` in the top level of their activity, but what if they don't? What if they have some kind of conditionally-rendered child component which tries to run `useRtc`? Developer documentation could help, but it's not perfect, and it's really not something I want to have to rely on here.
+
+[^blog_contexts]: This blog actually makes [heavy](https://github.com/TheUnlocked/necode-blog/blob/d1afd0cce72e6f939c3bf37e03c18a13aa213588/src/useStaticFetch.tsx) [use](https://github.com/TheUnlocked/necode-blog/blob/d1afd0cce72e6f939c3bf37e03c18a13aa213588/src/useStaticCompute.tsx) of that technique for things like fetching GitHub [issue](https://github.com/TheUnlocked/necode-blog/blob/d1afd0cce72e6f939c3bf37e03c18a13aa213588/src/github/Issue.tsx#L18)/[PR](https://github.com/TheUnlocked/necode-blog/blob/d1afd0cce72e6f939c3bf37e03c18a13aa213588/src/github/Pull.tsx#19) data during compile time.
+
+Instead, I handle specifying RTC policies in a very similar manner as in the old API, but with a bit more room for configuration.
+
+```diff-tsx
+  interface ActivityDescription {
+      id: string;
+      displayName: string;
+      requiredFeatures: Features;
+      defaultConfig: ConfigData;
+-     rtcPolicy?: string;
++     configurePolicies?: (config: ConfigData) => readonly PolicyConfiguration[];
+      configWidget?: Importable<ComponentType<ActivityConfigWidgetProps>>;
+      configPage?: Importable<ComponentType<ActivityConfigPageProps>>;
+      activityPage: Importable<ComponentType<ActivityPageProps>>;
+  }
+```
+
+So the canvas ring activity that only uses RTC network with no policy configuration would still look pretty simple:
+
+```diff-tsx
+  const canvasActivityDescription = activityDescription({
+      id: 'core/canvas-ring',
+      displayName: 'Canvas Ring',
+      requiredFeatures: [
+          supportsEntryPoint
+      ] as const,
+      activityPage: async () => (await import('./CanvasActivity')).CanvasActivity,
+-     rtcPolicy: 'ring',
++     configurePolicies: () => [{ name: 'ring' }],
+      defaultConfig: undefined
+  });
+```
+
+But significantly more complicated network structures can now also be created, and they can depend on activity configuration.
+
+Then to create a channel on a network, you just use the ID of the network, corresponding to its position in the array returned by `configurePolicies`.[^network_limit] This completely removes the need for `useRtc`, and is in some ways actually a little bit neater and more idiomatic than the original design, even if logic is less centralized.
+
+[^network_limit]: Currently activities are limited to only two networks because, well, it's unlikely that more than that would ever be needed and I want to discourage people from using new networks when they could be just making more channels on an existing network (this is important more for RTC peering reasons rather than for server bandwidth, though that too). If a use case for more than two networks comes up, I'm happy to extend the limit in the future.
+
+### Explicit Channel Names
+
+The next difference from the initial design is the inclusion of channel names (in the example way up above, the channel name is `"canvas"`). To explain this, we'll need to back up a bit once again.
+
+In order to make sure that data is being received by the right handler in peers, all messages come attached with a header identifying which channel the message came from.[^media_channel_messages][^why_multiplexing] Determining what identifier should go in this header is a bit tricky though.
+
+Initially the plan was to use some fancy incrementing mechanism to uniquely assign each channel with a unique ID, but due to the child component issue from before it ended up being unworkable. Next I tried [`useId`](https://reactjs.org/docs/hooks-reference.html#useid), a new hook in React 18 which looks like it should be perfect for this. According to the documentation, this ID is stable across the server and client, so surely it should be stable across multiple clients too. Reading the pull request for how the ID is generated only further convinced me of this truth.
+
+[^media_channel_messages]: Media channels also send these messages, though not to send media. The messages are used to inform the recipients of which media stream corresponds to which channel.
+
+[^why_multiplexing]: All non-media data sent on a peer connection is multiplexed over a single WebRTC data channel. This didn't necessarily need to be the case--WebRTC supports multiple data channels on a single peer--but [`simple-peer`](https://github.com/feross/simple-peer), the RTC library I'm using, does not. Plus, multiplexing does make some things a bit simpler with media streams, and probably has negligible additional overhead if any.
+
+Sadly it was not true. Well, it sort of was--if two clients loaded the activity page directly, they would have the same `useId`-based channel IDs. However, if, for example, one user left the activity and then came back without reloading the page, the IDs would fall out of sync and the channels would no longer have the same ID. So yes, the IDs are consistent across server and client for the purposes of hydration, but they aren't necessarily consistent if something unmounts and remounts.[^useid_desync_why]
+
+[^useid_desync_why]: I'm still not entirely sure why, since based on the `useId` algorithm for I think I should have been fine. Maybe it's because of the wonky stuff I'm doing with how I load activities. Or maybe there's just a bug in the algorithm. Regardless, the issue is now obsolete.
+
+I spent a significant amount of time trying to narrow down the issue and account for it, but eventually I gave up and decided that wasn't the way. Maybe there's a way to do it, there probably is, but I'm not going to spend any more time looking for it. Explicit channel names are good enough.
+
+
+### Conclusion
+
+While the changes certainly tone down the amazement factor of RTC "just working," I think they're probably for the best. Removing "magic" is always a worthy goal, and the changes require activity developers to be much more explicit about their intent without really impacting what they're able to do or increasing the amount of code they have to write to do it. I'm going to look at the changes as being a win/win/win for clarity, reliability, and my sanity.
+
+## Remaining RTC Work
+
+There is some remaining work to do on RTC, but I'll deal with that when the time comes, probably once I start trying to get small groups with linked editors. Maybe that will be this next week, maybe it will be later, we'll see.
+
+## Other Stuff
+
+Oh yeah and RTC is actually very reliable now across browsers and devices and networks due to [a truly amazing bug fix](https://github.com/TheUnlocked/Necode/commit/82585d1ee5b0851e16af0766178441d8b71ba311) so that's awesome. And to celebrate the new RTC API I have a [brand new ring activity](https://github.com/TheUnlocked/Necode/blob/47692937cc4cb0e939e59e759bb768fdf4f4762b/src/activities/p5-canvas/activity.tsx) for [p5.js](https://p5js.org/) which uses it.
+
+Tune in next week for hopefully something new!
