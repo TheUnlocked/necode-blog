@@ -1,0 +1,112 @@
+---
+title: DND 2e
+subtitle: The week of October 2, 2022
+authors: [Trevor Paley]
+createdOn: 2022-10-09T00:00:15.251Z
+tags: [weekly-update]
+---
+
+# Actions
+
+## Issues
+
+Opened:
+
+* <Issue id={51}/>
+
+Closed:
+
+* <Issue id={40}/>
+* <Issue id={41}/>
+
+## Pull Requests
+
+Opened:
+
+* <Issue id={52}/>
+
+Merged:
+
+* <Issue id={52}/>
+
+# Discussion
+
+There were some refinements to the p5.js ring activity, but this week isn't about RTC or canvases or any of that. There was also a bit of work on the paper side, but that's not the focus of this week's post either.
+
+[A few weeks ago](/posts/2022-09-17) I mentioned that I had made a new drag-and-drop library, but that I hadn't integrated it into Necode. Well that has now changed! [`use-dnd`](https://github.com/TheUnlocked/use-dnd) is now live on [NPM](https://www.npmjs.com/package/use-dnd) and in use on [Necode beta](https://beta.necode.org).[^dnd_2e]
+
+[^dnd_2e]: This post is called "DND 2e" as a reference to Dungeons and Dragons edition naming, but technically the `use-dnd` package is only at version 1.2.3 at the time of posting. Sadly DND 1.2.3e doesn't quite have the same ring to it.
+
+## Naming
+
+A reasonable question might be why there was such a long gap between making a library and integrating it. If you take a look at the [merge commit](https://github.com/TheUnlocked/Necode/commit/baaa607f790cf01c435302711e4667b52207bcb3) the changes aren't really that complicated, so it can't have been particularly labor intensive to start using the library.
+
+And it wasn't! If that was the holdup, `use-dnd` would've already been in Necode back when I first mentioned it. The issue was actually the name: `use-dnd`. See, `use-dnd` is a very nice name for a library, and where there are nice names there are squatters, specifically on NPM in this situation. Fortunately NPM provides a [name dispute resolution process](https://docs.npmjs.com/policies/disputes) for claiming names which are unjustly owned (because of squatting, trademark violations, or other reasons). Unfortunately that process can take a few weeks, and in my case it did. I initiated the dispute resolution process back then, and last week the name got transfered to me. After a bit of a delay from focusing on other stuff, I finally got around to publishing and integrating `use-dnd` this week.
+
+## How It Works
+
+`use-dnd` actually had to be mostly redesigned after my initial attempt to integrate it into Necode due to performance reasons. To see why, let's take a look at the original design:
+
+```plain
+  ┌────────────────────────────┐
+  │ (context)                  │
+  │  ┌─────────┐  ┌─────────┐  │
+  │  │ useDrag │  │ useDrag │  │
+  │  └────┬────┘  └────┬────┘  │
+  └───────┼────────────┼───────┘
+          │            │ setDragging()
+          ▼            ▼
+       ┌──────────────────┐
+       │ DragDropProvider │
+       └────────┬─────────┘
+                │ value
+                ▼
+┌─────────────────────────────────┐
+│ (context)                       │
+│  ┌─────────┐  ┌──────────────┐  │
+│  │ useDrop │  │ useDragLayer │  │
+│  └─────────┘  └──────────────┘  │
+│  ┌─────────┐  ┌─────────┐       │
+│  │ useDrop │  │ useDrop │       │
+│  └─────────┘  └─────────┘       │
+└─────────────────────────────────┘
+```
+`useDrag` was provided a callback to notify the `DragDropProvider` when an item was dragged via a context. This context always had the same value, so changes to the drag state would never force a re-render on the `useDrag` hooks. On the other side, there is a unidirectional flow from the `DragDropProvider` to the `useDrop` and `useDragLayer` hooks, providing information on the currently dragged item and the latest drag event. This solution is very straightforward to think of and implement, but it has severe performance implications. Whenever a drag event is fired, _every_ drop target must re-render because the context changed, even if the event was nowhere near the drop target, or the drop target couldn't even accept the dragged item.
+
+The solution is for the `DragDropProvider` to not provide any data at all via context, but rather to use context to allow hooks to subscribe to changes.
+```plain
+                     ┌──────────────────┐
+              ┌─────►│ DragDropProvider │
+              │      └──────────────────┘
+              │       ▲     ▲  ▲ ▲  ▲
+setDragging() │  ┌────┘     │  │ │  │ subscribe()
+              │  │          │  │ │  │
+  ┌───────────┼──┼──────────┼──┼─┼──┼───────────────┐
+  │ (context) │  │          │  │ │  │               │
+  │  ┌────────┴┐ │ ┌────────┴┐ │ │ ┌┴─────────────┐ │
+  │  │ useDrag │ │ │ useDrop │ │ │ │ useDragLayer │ │
+  │  └─────────┘ │ └─────────┘ │ │ └──────────────┘ │
+  │  ┌─────────┐ │ ┌─────────┐ │ │ ┌─────────┐      │
+  │  │ useDrag ├─┘ │ useDrop ├─┘ └─┤ useDrop │      │
+  │  └─────────┘   └─────────┘     └─────────┘      │
+  └─────────────────────────────────────────────────┘
+```
+Both functions provided by the context are stable, meaning the context value _never_ changes, so context will never trigger a re-render. Then in the subscription callbacks, each hook can decide whether it wants to update internal state (triggering a re-render), or ignore the event if the event doesn't pertain to the hook at all (or nothing that the hook cares about changed).
+
+This has skyrocketed `use-dnd` performance, making it feel even more performant in Necode than [`react-dnd`](https://github.com/react-dnd/react-dnd/) (the DND library Necode previously used) did. In theory this would be because `use-dnd` now triggers fewer re-renders than `react-dnd` did with lower overhead on drag/drop events, though note that I haven't done quantitative analysis so take these claims with a grain of salt.[^react-dnd-redux] The claim you don't have to take with a grain of salt is that `use-dnd` is now plenty performant for me to feel comfortable using it in Necode.
+
+[^react-dnd-redux]: `react-dnd` uses a [Redux](https://redux.js.org/) store which uses a similar subscription mechanism to what I designed for `use-dnd`. However, from briefly looking at the source it's tricky to tell what exactly causes relevant parts of the store to update, and through `printf`-debugging it seems like `react-dnd` probably renders slightly more often. Again, I haven't done any rigorous comparisons so it's very possible that we're both updating the same amount. `use-dnd` _should_ still have lower-overhead updates, and is certainly able to provide features that `react-dnd` is not. There are also some other theoretical performance benefits to the `use-dnd` implementation with `useDragLayer` because of how it's tied to the React render loop but again, I don't have data to prove it right now.
+
+## `use-dnd` Benefits
+
+A question you may be asking is about I care about `use-dnd` in the first place. Yes, there are size and possibly performance benefits, but it's not like `react-dnd` was _that_ costly in the first place. So what is the real motivation?
+
+Well firstly, moving to my own library has allowed me to resolve two outstanding bugs which were previously marked with the `upstream` label, <Issue id={40} short/> and <Issue id={41} short/>. However, both of these already had [upstream](https://github.com/react-dnd/react-dnd/pull/3495) [patches](https://github.com/react-dnd/react-dnd/pull/3498) (contributed by yours truly) which could have been merged in eventually, and neither of the issues was hugely urgent.
+
+The "killer feature" provided by `use-dnd` is support for what I call "foreign objects." This is the ability to drag something from one window to another, like you might be used to doing with text or files. This is simply impossible to do in `react-dnd`, and implementing a `react-dnd` solution myself [would be harder than just making a new library](https://github.com/react-dnd/react-dnd/issues/3407). In `use-dnd` however, it's as simple as setting a flag on `useDrop` to allow foreign objects to be received (and `useDragLayer` detects them automatically).
+
+Currently only the activity clone button supports foreign objects, but the plan is to enable foreign object support for copying activities/lessons to dates (and maybe even drag-copying activities directly into a position lesson pane???). Since `use-dnd` is a new library and I want to give it a bit of time to show its flaws, this is currently only available on [beta](https://beta.necode.org), but hopefully I'll feel comfortable promoting it to production in the not-too-distant future!
+
+## Future Work
+
+WPI's term break starts next Friday so I'm unusure if I'll make another post next week, and I probably won't make a post on the week of the break, so it may be three weeks until there's another post. In the coming weeks more time is also probably going to be spent on writing, so it could be even longer before there's interesting technical stuff to talk about. We'll see! Whenever the next update does land, hopefully it will be an exiciting one.
