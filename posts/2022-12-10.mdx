@@ -1,0 +1,169 @@
+---
+title: Shared Editors
+subtitle: The week of December 5, 2022
+authors: [Trevor Paley]
+createdOn: 2022-12-11T22:27:11.435Z
+tags: [weekly-update, rtc]
+---
+
+# Actions
+
+## Issues
+
+Opened:
+
+_None_
+
+Closed (since last post):
+
+* <Issue id={47}/>
+* <Issue id={48}/>
+
+## Pull Requests
+
+Opened (since last post):
+
+* <Pull id={53}/>
+* <Pull id={54}/>
+
+Merged (since last post):
+
+* <Pull id={53}/>
+* <Pull id={54}/>
+
+# Discussion
+
+After a long hiatus of a school break and then writing, development has started back up again![^winter_break] It's great to be back to working in the Necode codebase again, and this week I have an exciting new feature to share.
+
+[^winter_break]: Just in time for winter break too! _sigh..._
+
+## RTC API Changes
+
+But first, declarative RTC has changed once again. Or rather, some new features have been added to it.
+
+### The emit function
+
+<Info>
+    View the source for the emit function [here](https://github.com/TheUnlocked/Necode/blob/7f25985020c06d6861a8f3643b030adf2c85f59b/src/hooks/RtcHooks.tsx#L207)
+</Info>
+
+While I talked about `useMediaChannel` in [the previous post about RTC](/posts/2022-10-01), there was also a companion hook, `useDataChannel` for sending plain bytes to peers.[^use_string_data_channel] You would use it like this:
+
+[^use_string_data_channel]: `useDataChannel` operates on `Uint8Array`s (i.e. byte arrays), so there's also yet another hook called `useStringDataChannel` which does the exact same thing but sends and receives `string`s. In theory it might be possible to use both of them together to send strings and receive utf-8-encoded byte arrays (and vice versa), but I offer no warranty.
+
+```tsx
+// In practice you'd want to use `useCallback` here, but it's, um, probably fine
+const emit = useDataChannel(NetworkId.NET_0, 'my-data-channel', data => {
+    // `data` was received from a peer
+    console.log('Received data:', data);
+});
+
+// ...
+
+// Broadcast `bytes` to all peers
+console.log('Sending data:', bytes);
+emit(bytes);
+```
+
+However, while broadcasting data to all peers might be useful in some cases, it's often just a waste of resources, or may even have unfavorable semantics. The new `emit` lets you optionally specify which peers to send it to:
+
+```tsx
+const emit = useDataChannel(NetworkId.NET_0, 'my-data-channel', (data, from) => {
+    // `data` was received from peer `from`
+    console.log('Received data', data, 'from', from);
+});
+
+// ...
+
+// Send `bytes` to just `peer`
+console.log('Sending data', bytes, 'to', peer);
+emit(bytes, { target: [peer.id] });
+```
+
+### `useDataChannelLifecycle`
+
+<Info>
+    View the source for `useDataChannelLifecycle` [here](https://github.com/TheUnlocked/Necode/blob/7f25985020c06d6861a8f3643b030adf2c85f59b/src/hooks/RtcHooks.tsx#L250)
+</Info>
+
+In addition to targeting specific peers, it can also be valuable to listen to lifecycle events, which the new `useDataChannelLifecycle` hook allows you to do.[^lifecycle] A clear example of when this would be useful will be shown in the next section, but it works in a relatively similar manner to `useDataChannel`:
+
+[^lifecycle]: It also allows you to listen for incoming data, though that's not actually a lifecycle event. More of a convenience thing.
+
+```tsx
+const emit = useDataChannelLifecycle(
+    NetworkId.NET_0,
+    'my-data-channel',
+    (event, data, emit) => {
+        switch (event) {
+            case 'connect':
+                // ...
+                break;
+            case 'message':
+                // ...
+                break;
+            case 'disconnect':
+                // ...
+                break;
+        }
+    }
+);
+```
+
+## Shared editors
+
+Pardon the awkward delays as I switch between monitors to play both roles in the following video:
+
+<Video src="shared-editors.mp4" />
+
+This uses [Yjs](https://yjs.dev/) for the shared editor, powered by `useDataChannelLifecycle`! Rather than sending your full editor state every time there's a change, if you know when someone connects, you can send the full state _then_, and only incremental changes from then on. Let's see [how it's implemented](https://github.com/TheUnlocked/Necode/blob/7f25985020c06d6861a8f3643b030adf2c85f59b/src/hooks/useY.ts):
+
+```tsx
+export default function useY(network: NetworkId, channel: string) {
+    // Create a Yjs document
+    const yDoc = useMemo(() => new Y.Doc(), []);
+
+    // Open up a data channel with lifecycle hooks
+    const emit = useDataChannelLifecycle(
+        network,
+        channel,
+        // This weird destructuring is just to make TypeScript happy.
+        useCallback((...[event, data, emit]) => {
+            switch (event) {
+                case 'connect':
+                    // When we connect, send over our current state
+                    console.debug('Sending initial Y state to', data.who.id);
+                    emit(Y.encodeStateAsUpdateV2(yDoc), { target: [data.who.id] });
+                    break;
+                case 'message':
+                    // Whenever we receive an update from a peer, apply it to our own doc
+                    Y.applyUpdateV2(yDoc, data.content);
+            }
+        }, [yDoc]),
+    );
+
+    // Effect to establish an event listener on the doc
+    useEffect(() => {
+        const handler = (update: Uint8Array) => {
+            // When there's an update, broadcast it to peers
+            emit(Y.convertUpdateFormatV1ToV2(update));
+        };
+        // Listen to updates
+        yDoc.on('update', handler);
+        return () => yDoc.off('update', handler);
+    }, [yDoc, emit]);
+
+    // Return the document so that consumers can use it
+    return yDoc;
+}
+```
+
+And that's all there is to it! Broadcast changes, apply received updates, and send your full state to newcomers so they can get up to speed.
+
+With the document from `useY`, it can be hooked into other features like [`y-monaco`](https://github.com/yjs/y-monaco) for the editor, another hook called [`useYAwareness`](https://github.com/TheUnlocked/Necode/blob/7f25985020c06d6861a8f3643b030adf2c85f59b/src/hooks/useY.ts#L41) for the indicators showing where other users are doing, and so on.
+
+And the good news is, all of this is now in [beta](https://beta.necode.org/), so it should be considered stable-ish for those who want to play around with it.
+
+## Cold start
+
+In other news, lambda cold starts are much better now. With the introduction of Next.js 13, a new experimental config feature called `outputFileTracingIgnores` was added to allow excluding certain modules from the "trace" that's used to package lambdas for AWS. This enabled me to finally get MUI out of the server build, and cold starts are now down to just 2-3 seconds. Much better than the nearly 10 seconds I was getting previously. Hopefully this will make it to production soon as well!
